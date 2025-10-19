@@ -1,0 +1,8 @@
+[toolchain]
+# 指定目标三元组
+targets = ["xtensa-esp32-espidf", "riscv32imc-esp-espidf"]
+
+# 指定组件（如果使用 espup 安装的工具链）
+components = ["cargo", "rustc", "rust-std", "rls", "rust-analysis", "clippy", "rustfmt"]
+
+channel = "esp"
