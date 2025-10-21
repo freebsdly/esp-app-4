@@ -13,13 +13,15 @@ static I2C: Mutex<RefCell<Option<I2c<Blocking>>>> = Mutex::new(RefCell::new(None
 // 在全局静态变量中添加按键状态跟踪
 // [KEY0, KEY1, KEY2, KEY3]
 static KEY_STATES: Mutex<RefCell<[bool; 4]>> = Mutex::new(RefCell::new([false; 4]));
+// 添加背光状态跟踪
+static BL_STATE: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(false));
 
 // 寄存器地址
 pub mod registers {
     pub const INPUT_PORT_0: u8 = 0;
     pub const INPUT_PORT_1: u8 = 1;
-    // pub const OUTPUT_PORT_0: u8 = 2;
-    // pub const OUTPUT_PORT_1: u8 = 3;
+    pub const OUTPUT_PORT_0: u8 = 2;
+    pub const OUTPUT_PORT_1: u8 = 3;
     // pub const INVERSION_PORT_0: u8 = 4;
     // pub const INVERSION_PORT_1: u8 = 5;
     // pub const CONFIG_PORT_0: u8 = 6;
@@ -36,10 +38,10 @@ pub mod io_bits {
     // pub const OV_RESET_IO: u16 = 0x0020; // P0.5
     // pub const GBC_LED_IO: u16 = 0x0040; // P0.6
     // pub const GBC_KEY_IO: u16 = 0x0080; // P0.7
-    // pub const LCD_BL_IO: u16 = 0x0100; // P1.0
+    pub const LCD_BL_IO: u16 = 0x0100; // P1.0
     // pub const CT_RST_IO: u16 = 0x0200; // P1.1
-    // pub const SLCD_RST_IO: u16 = 0x0400; // P1.2
-    // pub const SLCD_PWR_IO: u16 = 0x0800; // P1.3
+    pub const SLCD_RST_IO: u16 = 0x0400; // P1.2
+    pub const SLCD_PWR_IO: u16 = 0x0800; // P1.3
     pub const KEY3_IO: u16 = 0x1000; // P1.4
     pub const KEY2_IO: u16 = 0x2000; // P1.5
     pub const KEY1_IO: u16 = 0x4000; // P1.6
@@ -56,7 +58,81 @@ pub async fn init(
         .with_sda(sda)
         .with_scl(scl);
 
-    critical_section::with(|cs| I2C.borrow_ref_mut(cs).replace(i2c));
+    critical_section::with(|cs| {
+        I2C.borrow_ref_mut(cs).replace(i2c);
+    });
+}
+
+// 控制背光状态的函数
+pub fn set_backlight_state(i2c: &mut I2c<Blocking>, state: bool) {
+    // 读取当前端口1输出状态
+    let mut port1_data = [0u8];
+    if i2c
+        .write_read(XL9555_ADDR, &[registers::OUTPUT_PORT_1], &mut port1_data)
+        .is_ok()
+    {
+        // 根据状态设置背光引脚
+        let new_port1_data = if state {
+            port1_data[0] | (io_bits::LCD_BL_IO >> 8) as u8 // 设置P1.0为高电平
+        } else {
+            port1_data[0] & !((io_bits::LCD_BL_IO >> 8) as u8) // 设置P1.0为低电平
+        };
+
+        // 写回端口1输出
+        i2c.write(XL9555_ADDR, &[registers::OUTPUT_PORT_1, new_port1_data])
+            .ok();
+    }
+}
+
+// 控制 SPI LCD 电源状态的函数
+pub fn set_spi_lcd_power_state(i2c: &mut I2c<Blocking>, state: bool) {
+    // 读取当前端口1输出状态
+    let mut port1_data = [0u8];
+    if i2c
+        .write_read(XL9555_ADDR, &[registers::OUTPUT_PORT_1], &mut port1_data)
+        .is_ok()
+    {
+        // 根据状态设置 SPI LCD 电源引脚 (P1.3)
+        let new_port1_data = if state {
+            port1_data[0] | (io_bits::SLCD_PWR_IO >> 8) as u8 // 设置P1.3为高电平
+        } else {
+            port1_data[0] & !((io_bits::SLCD_PWR_IO >> 8) as u8) // 设置P1.3为低电平
+        };
+
+        // 写回端口1输出
+        i2c.write(XL9555_ADDR, &[registers::OUTPUT_PORT_1, new_port1_data])
+            .ok();
+    }
+}
+
+// 控制 SPI LCD 复位状态的函数
+pub fn set_spi_lcd_reset_state(i2c: &mut I2c<Blocking>, state: bool) {
+    // 读取当前端口1输出状态
+    let mut port1_data = [0u8];
+    if i2c
+        .write_read(XL9555_ADDR, &[registers::OUTPUT_PORT_1], &mut port1_data)
+        .is_ok()
+    {
+        // 根据状态设置 SPI LCD 复位引脚 (P1.2)
+        let new_port1_data = if state {
+            port1_data[0] | (io_bits::SLCD_RST_IO >> 8) as u8 // 设置P1.2为高电平
+        } else {
+            port1_data[0] & !((io_bits::SLCD_RST_IO >> 8) as u8) // 设置P1.2为低电平
+        };
+
+        // 写回端口1输出
+        i2c.write(XL9555_ADDR, &[registers::OUTPUT_PORT_1, new_port1_data])
+            .ok();
+    }
+}
+
+// 添加公共函数用于外部调用
+pub fn spi_lcd_reset(state: bool) {
+    critical_section::with(|cs| {
+        let mut i2c = I2C.borrow_ref_mut(cs);
+        let i2c_ref = i2c.as_mut().unwrap();
+        set_spi_lcd_reset_state(i2c_ref, state);
+    });
 }
 
 /**
@@ -108,7 +184,17 @@ pub async fn read_keys() {
                     // 按键刚被按下
                     match i {
                         0 => info!("KEY0 pressed"),
-                        1 => info!("KEY1 pressed"),
+                        1 => {
+                            info!("KEY1 pressed - toggling LCD backlight");
+                            // 切换背光状态
+                            let mut bl_state = BL_STATE.borrow_ref_mut(cs);
+                            *bl_state = !*bl_state;
+                            set_backlight_state(i2c_ref, *bl_state);
+                            info!(
+                                "LCD backlight is now {}",
+                                if *bl_state { "ON" } else { "OFF" }
+                            );
+                        }
                         2 => info!("KEY2 pressed"),
                         3 => info!("KEY3 pressed"),
                         _ => {}
