@@ -10,12 +10,14 @@ use defmt::info;
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use esp_hal::clock::CpuClock;
+use esp_hal::peripherals;
 use esp_hal::timer::timg::TimerGroup;
 use {esp_backtrace as _, esp_println as _};
 
 mod button;
 mod led;
 mod wifi;
+mod xl9555;
 
 extern crate alloc;
 
@@ -24,13 +26,13 @@ extern crate alloc;
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[esp_rtos::main]
-async fn main(spawner: Spawner) -> ! {
+async fn main(spawner: Spawner) {
     // generator version: 0.6.0
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
-    esp_alloc::heap_allocator!(#[unsafe(link_section = ".dram2_uninit")] size: 73744);
+    esp_alloc::heap_allocator!(size: 64 * 1024);
 
     let time_g0_timer = peripherals.TIMG0;
     let time_g0 = TimerGroup::new(time_g0_timer);
@@ -44,10 +46,12 @@ async fn main(spawner: Spawner) -> ! {
 
     // Initialize WiFi
     wifi::init(peripherals.WIFI).await;
-    spawner.spawn(wifi::wifi_scan()).ok();
+    spawner
+        .spawn(wifi::wifi_scan())
+        .expect("failed to spawn wifi task");
 
-    loop {
-        led::led0_toggle().await;
-        Timer::after(Duration::from_secs(1)).await;
-    }
+    xl9555::init(peripherals.I2C0, peripherals.GPIO41, peripherals.GPIO42).await;
+    spawner
+        .spawn(xl9555::read_keys())
+        .expect("failed to spawn xl9555 task")
 }
