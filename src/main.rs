@@ -93,25 +93,13 @@
 )]
 
 extern crate alloc;
-use core::cell::RefCell;
 use defmt::info;
-use display_interface_spi::SPIInterface;
-use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embassy_executor::Spawner;
-use embassy_sync::mutex::Mutex;
-use embassy_time::{Duration, Timer};
-use embedded_hal::spi::MODE_0;
 use esp_hal::clock::CpuClock;
-use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
-use esp_hal::gpio::Io;
-use esp_hal::spi::master::{Config, Spi, SpiDma};
+use esp_hal::spi::master::{Config, Spi};
 use esp_hal::spi::Mode;
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
-use esp_hal::{dma_buffers, peripherals};
-use mipidsi::models::ST7789;
-use mipidsi::Builder;
-use {esp_backtrace as _, esp_println as _};
 
 mod button;
 mod lcd;
@@ -119,8 +107,8 @@ mod led;
 mod wifi;
 mod xl9555;
 
-/// 创建 esp-idf bootloader 所需的默认应用程序描述符
-/// 更多信息请参见: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
+// 创建 esp-idf bootloader 所需的默认应用程序描述符
+// 更多信息请参见: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[esp_rtos::main]
