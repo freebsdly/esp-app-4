@@ -39,7 +39,7 @@ esp-radio = { version = "0.17.0", features = [
     "unstable",
     "wifi",
 ] }
-embassy-net = { version = "0.7.0", features = [
+embassy-net = { version = "0.7.1", features = [
     "defmt",
     "dhcpv4",
     "medium-ethernet",
