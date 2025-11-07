@@ -7,6 +7,23 @@ use esp_hal::i2c::master::Config as I2cConfig;
 use esp_hal::i2c::master::{I2c, Instance};
 use esp_hal::Blocking;
 
+/// XL9555 I2C GPIO 扩展芯片驱动
+///
+/// 该模块提供了对 XL9555 GPIO 扩展芯片的完整控制功能，包括：
+/// - LCD 背光控制
+/// - LCD 复位控制
+/// - 按键输入检测
+///
+/// XL9555 具有 16 个 GPIO 引脚，分为两个 8 位端口：
+/// - P0 端口：P0.0-P0.7 (按键连接在此端口)
+/// - P1 端口：P1.0-P1.7 (LCD 控制信号连接在此端口)
+///
+/// # 使用方法
+///
+/// 1. 调用 [init] 函数初始化 XL9555
+/// 2. 调用 [init_atk_md0240] 函数初始化 LCD 模块
+/// 3. 调用 [set_lcd_backlight] 函数控制 LCD 背光
+/// 4. 启动 [read_keys] 任务检测按键输入
 pub const XL9555_ADDR: u8 = 0x20; // 7-bit I2C 地址
 
 static I2C: Mutex<RefCell<Option<I2c<Blocking>>>> = Mutex::new(RefCell::new(None));
@@ -16,7 +33,23 @@ static KEY_STATES: Mutex<RefCell<[bool; 4]>> = Mutex::new(RefCell::new([false; 4
 // 添加背光状态跟踪
 static BL_STATE: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(true));
 
-// 寄存器地址
+/// 寄存器地址定义
+///
+/// XL9555 芯片包含以下寄存器：
+/// - 输入端口寄存器：用于读取 GPIO 引脚状态
+/// - 输出端口寄存器：用于设置 GPIO 引脚输出状态
+/// - 极性反转寄存器：用于设置 GPIO 引脚极性
+/// - 配置寄存器：用于设置 GPIO 引脚方向（输入/输出）
+///
+/// 寄存器地址说明：
+/// - INPUT_PORT_0: 0x00 - P0 端口输入寄存器
+/// - INPUT_PORT_1: 0x01 - P1 端口输入寄存器
+/// - OUTPUT_PORT_0: 0x02 - P0 端口输出寄存器
+/// - OUTPUT_PORT_1: 0x03 - P1 端口输出寄存器
+/// - INVERSION_PORT_0: 0x04 - P0 端口极性反转寄存器
+/// - INVERSION_PORT_1: 0x05 - P1 端口极性反转寄存器
+/// - CONFIG_PORT_0: 0x06 - P0 端口方向配置寄存器
+/// - CONFIG_PORT_1: 0x07 - P1 端口方向配置寄存器
 pub mod registers {
     pub const INPUT_PORT_0: u8 = 0;
     pub const INPUT_PORT_1: u8 = 1;
@@ -28,7 +61,21 @@ pub mod registers {
     pub const CONFIG_PORT_1: u8 = 7;
 }
 
-// IO 位定义 (P0: bit 0~7, P1: bit 8~15)
+/// IO 位定义
+///
+/// 定义 XL9555 各个 IO 引脚的功能分配
+/// IO 引脚分为两组：
+/// - P0 端口（P0.0-P0.7）：主要用于按键输入
+/// - P1 端口（P1.0-P1.7）：主要用于 LCD 控制信号输出
+///
+/// 引脚分配说明：
+/// - LCD_BL_IO: P1.0 - LCD 背光控制（备用）
+/// - SLCD_RST_IO: P1.2 - SPI LCD 复位信号
+/// - SLCD_PWR_IO: P1.3 - SPI LCD 电源/背光控制
+/// - KEY0_IO: P1.7 - 按键 0 输入
+/// - KEY1_IO: P1.6 - 按键 1 输入
+/// - KEY2_IO: P1.5 - 按键 2 输入
+/// - KEY3_IO: P1.4 - 按键 3 输入
 pub mod io_bits {
     // pub const AP_INT_IO: u16 = 0x0001; // P0.0
     // pub const QMA_INT_IO: u16 = 0x0002; // P0.1
@@ -48,6 +95,20 @@ pub mod io_bits {
     pub const KEY0_IO: u16 = 0x8000; // P1.7
 }
 
+/// 初始化 XL9555 芯片
+///
+/// 配置 I2C 接口并设置 GPIO 引脚方向：
+/// - P0 端口配置为输入模式，用于按键检测
+/// - P1 端口部分配置为输出模式，用于 LCD 控制信号
+///
+/// # 参数
+/// * `i2c` - I2C 实例
+/// * `sda` - SDA 引脚
+/// * `scl` - SCL 引脚
+///
+/// # Panics
+///
+/// 当 I2C 初始化失败时会 panic
 pub async fn init(
     i2c: impl Instance + 'static,
     sda: impl PeripheralOutput<'static>,
@@ -63,14 +124,22 @@ pub async fn init(
     // P1配置为输出，但按键引脚配置为输入
     // P1.0-P1.3 为输出（LCD控制）
     // P1.4-P1.7 为输入（按键）
+    // 配置 P0 端口为输入模式
+    // P0 端口连接按键，需要配置为输入模式以检测按键状态
     i2c.write(XL9555_ADDR, &[registers::CONFIG_PORT_0, 0xFF])
         .expect("Failed to configure XL9555 PORT0");
+    // 配置 P1 端口方向
+    // P1 端口混合使用，低 4 位用于 LCD 控制（输出），高 4 位用于按键（输入）
+    // 0xF0 表示高 4 位为输入(1)，低 4 位为输出(0)
     i2c.write(XL9555_ADDR, &[registers::CONFIG_PORT_1, 0xF0])
         .expect("Failed to configure XL9555 PORT1");
 
-    // 初始化输出端口状态
+    // 初始化 P0 端口输出状态
+    // 将 P0 端口输出寄存器初始化为 0
     i2c.write(XL9555_ADDR, &[registers::OUTPUT_PORT_0, 0x00])
         .ok();
+    // 初始化 P1 端口输出状态
+    // 将 P1 端口输出寄存器初始化为 0
     i2c.write(XL9555_ADDR, &[registers::OUTPUT_PORT_1, 0x00])
         .ok();
 
@@ -79,7 +148,15 @@ pub async fn init(
     });
 }
 
-// 控制 SPI LCD 电源状态的函数
+// 控制 SPI LCD 电源状态
+///
+/// 操作 I2C 接口控制 XL9555 的 P1.3 引脚来控制 LCD 电源（背光）
+/// 根据硬件设计，该引脚连接到 ATK-MD0240 模块的 PWR 引脚
+/// PWR 引脚带有下拉电阻，当引脚被拉高时背光点亮，拉低或悬空时背光关闭
+///
+/// # 参数
+/// * `i2c` - I2C 接口引用
+/// * `state` - 电源状态，true 表示开启（高电平），false 表示关闭（低电平）
 pub fn set_spi_lcd_power_state(i2c: &mut I2c<Blocking>, state: bool) {
     // 读取当前端口1输出状态
     let mut port1_data = [0u8];
@@ -100,7 +177,13 @@ pub fn set_spi_lcd_power_state(i2c: &mut I2c<Blocking>, state: bool) {
     }
 }
 
-// 控制 SPI LCD 复位状态的函数
+// 控制 SPI LCD 复位状态
+///
+/// 操作 I2C 接口控制 XL9555 的 P1.2 引脚来控制 LCD 复位信号
+///
+/// # 参数
+/// * `i2c` - I2C 接口引用
+/// * `state` - 复位状态，true 表示复位释放（高电平），false 表示复位（低电平）
 pub fn set_spi_lcd_reset_state(i2c: &mut I2c<Blocking>, state: bool) {
     // 读取当前端口1输出状态
     let mut port1_data = [0u8];
@@ -130,8 +213,54 @@ pub fn spi_lcd_reset(state: bool) {
     });
 }
 
-/// 控制 LCD 背光开关
-/// 根据描述，PWR 引脚带有下拉电阻，当引脚被拉低或悬空时背光关闭，当引脚被拉高时背光点亮
+/// 公共接口函数：控制 LCD 复位状态
+///
+/// 通过该函数可以外部调用设置 LCD 的复位状态
+///
+/// # 参数
+/// * `state` - 复位状态，true 表示复位释放（高电平），false 表示复位（低电平）
+pub fn set_lcd_reset(state: bool) {
+    critical_section::with(|cs| {
+        let mut i2c = I2C.borrow_ref_mut(cs);
+        let i2c_ref = i2c.as_mut().unwrap();
+        set_spi_lcd_reset_state(i2c_ref, state);
+    });
+}
+
+/// 控制背光状态的函数
+///
+/// 直接操作 I2C 接口控制 XL9555 的 P1.0 引脚来控制 LCD 背光
+///
+/// # 参数
+/// * `i2c` - I2C 接口引用
+/// * `state` - 背光状态，true 表示开启，false 表示关闭
+pub fn set_backlight_state(i2c: &mut I2c<Blocking>, state: bool) {
+    // 读取当前端口1输出状态
+    let mut port1_data = [0u8];
+    if i2c
+        .write_read(XL9555_ADDR, &[registers::OUTPUT_PORT_1], &mut port1_data)
+        .is_ok()
+    {
+        // 根据状态设置背光引脚 (P1.0)
+        let new_port1_data = if state {
+            port1_data[0] | (io_bits::LCD_BL_IO >> 8) as u8 // 设置P1.0为高电平
+        } else {
+            port1_data[0] & !((io_bits::LCD_BL_IO >> 8) as u8) // 设置P1.0为低电平
+        };
+
+        // 写回端口1输出
+        i2c.write(XL9555_ADDR, &[registers::OUTPUT_PORT_1, new_port1_data])
+            .ok();
+    }
+}
+
+/// 公共接口函数：控制 LCD 背光开关
+///
+/// 通过该函数可以外部调用设置 LCD 背光的开关状态
+/// 控制的是 XL9555 的 P1.3 引脚，该引脚连接到 ATK-MD0240 模块的 PWR 引脚
+///
+/// # 参数
+/// * `state` - 背光状态，true 表示开启背光，false 表示关闭背光
 pub fn set_lcd_backlight(state: bool) {
     critical_section::with(|cs| {
         let mut i2c = I2C.borrow_ref_mut(cs);
@@ -154,20 +283,31 @@ pub async fn init_atk_md0240() {
     Timer::after_millis(120).await;
 }
 
-/**
-* 读取按键输入
-* 状态跟踪: 添加 KEY_STATES 全局变量记录每个按键的上一次状态
-* 边缘检测: 只有当按键从释放状态(高电平)变为按下状态(低电平)时才触发事件
-* 状态更新: 每次循环结束后更新按键状态数组
-* 这样修改后，即使按键持续按下也只会触发一次日志输出，直到按键释放后再次按下才会重新触发
-* 硬件连接：
-* iic_int (XL9555中断引脚) 连接到 ESP32 的 GPIO0
-* GPIO0 同时也是 BOOT_BUTTON 的引脚
-* 中断触发机制：
-* 当 KEY0-KEY3 按下时，XL9555 通过 iic_int 引脚产生中断信号
-* 该信号传递到 GPIO0，触发了已注册的中断处理程序
-* 中断处理程序中会切换 LED 状态
-*/
+/// 按键输入检测任务
+///
+/// 该异步任务负责持续检测 XL9555 连接的按键状态
+/// 使用轮询方式每 50 毫秒检测一次按键状态
+/// 实现边缘检测，确保按键按下时只触发一次操作
+///
+/// 按键功能分配：
+/// - KEY0: 未分配特定功能
+/// - KEY1: 切换 LCD 背光状态
+/// - KEY2: 未分配特定功能
+/// - KEY3: 未分配特定功能
+///
+/// 读取按键输入
+/// 状态跟踪: 添加 KEY_STATES 全局变量记录每个按键的上一次状态
+/// 边缘检测: 只有当按键从释放状态(高电平)变为按下状态(低电平)时才触发事件
+/// 状态更新: 每次循环结束后更新按键状态数组
+/// 这样修改后，即使按键持续按下也只会触发一次日志输出，直到按键释放后再次按下才会重新触发
+/// 硬件连接：
+/// iic_int (XL9555中断引脚) 连接到 ESP32 的 GPIO0
+/// GPIO0 同时也是 BOOT_BUTTON 的引脚
+/// 中断触发机制：
+/// 当 KEY0-KEY3 按下时，XL9555 通过 iic_int 引脚产生中断信号
+/// 该信号传递到 GPIO0，触发了已注册的中断处理程序
+/// 中断处理程序中会切换 LED 状态
+///
 #[embassy_executor::task]
 pub async fn read_keys() {
     loop {
@@ -175,8 +315,11 @@ pub async fn read_keys() {
             let mut i2c = I2C.borrow_ref_mut(cs);
             let i2c_ref = i2c.as_mut().unwrap();
 
-            // 读取端口0和端口1的输入值
+            // 读取 P0 端口输入状态
+            // 通过读取输入端口寄存器获取 P0 端口当前的电平状态
             let mut port0_data = [0u8];
+            // 读取 P1 端口输入状态
+            // 通过读取输入端口寄存器获取 P1 端口当前的电平状态
             let mut port1_data = [0u8];
 
             i2c_ref
@@ -186,6 +329,9 @@ pub async fn read_keys() {
                 .write_read(XL9555_ADDR, &[registers::INPUT_PORT_1], &mut port1_data)
                 .ok();
 
+            // 组合按键值
+            //将 P1 和 P0 端口的值组合成一个 16 位值用于按键检测
+            // 高 8 位来自 P1 端口，低 8 位来自 P0 端口
             let key_value: u16 = (port1_data[0] as u16) << 8 | (port0_data[0] as u16);
 
             // 获取当前按键状态（低电平表示按下）
