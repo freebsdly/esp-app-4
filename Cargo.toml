@@ -9,12 +9,12 @@ name = "esp-app-4"
 path = "src/main.rs"
 
 [dependencies]
-esp-hal = { version = "=1.0.0-rc.1", features = [
+esp-hal = { version = "=1.0.0", features = [
     "defmt",
     "esp32s3",
     "unstable",
 ] }
-esp-rtos = { version = "0.1.1", features = [
+esp-rtos = { version = "0.2.0", features = [
     "defmt",
     "embassy",
     "esp-alloc",
@@ -23,15 +23,15 @@ esp-rtos = { version = "0.1.1", features = [
 ] }
 
 
-esp-bootloader-esp-idf = { version = "0.3.0", features = ["esp32s3"] }
+esp-bootloader-esp-idf = { version = "0.4.0", features = ["esp32s3"] }
 esp-alloc = { version = "0.9.0", features = ["defmt"] }
-esp-backtrace = { version = "0.18.0", features = [
+esp-backtrace = { version = "0.18.1", features = [
     "defmt",
     "esp32s3",
     "panic-handler",
 ] }
-esp-println = { version = "0.16.0", features = ["defmt-espflash", "esp32s3"] }
-esp-radio = { version = "0.16.0", features = [
+esp-println = { version = "0.16.1", features = ["defmt-espflash", "esp32s3"] }
+esp-radio = { version = "0.17.0", features = [
     "defmt",
     "esp-alloc",
     "esp32s3",
@@ -47,36 +47,18 @@ embassy-net = { version = "0.7.0", features = [
     "udp",
 ] }
 # for more networking protocol support see https://crates.io/crates/edge-net
-embassy-executor = { version = "0.9.0", features = ["defmt"] }
+embassy-executor = { version = "0.9.1", features = ["defmt"] }
 embassy-time = { version = "0.5.0", features = ["defmt"] }
 embassy-sync = "0.7.2"
 
 # embedded
-#embedded-hal = "1.0.0"
-embedded-io = { version = "0.7.1", features = ["defmt"] }
-embedded-io-async = { version = "0.7.0", features = ["defmt"] }
 embedded-graphics = { version = "0.8.1", features = ["defmt"] }
 display-interface-spi = { version = "0.5.0" }
 mipidsi = { version = "0.9.0" } # 替代 st7789 crate，功能更全面且维护活跃
 #
-smoltcp = { version = "0.12.0", default-features = false, features = [
-    "defmt",
-    "medium-ethernet",
-    "multicast",
-    "proto-dhcpv4",
-    "proto-dns",
-    "proto-ipv4",
-    "socket-dns",
-    "socket-icmp",
-    "socket-raw",
-    "socket-tcp",
-    "socket-udp",
-] }
-#
 critical-section = "1.2.0"
 static_cell = "2.1.1"
 defmt = "1.0.1"
-embassy-embedded-hal = "0.5.0"
 
 [profile.dev]
 # Rust debug is too slow.
