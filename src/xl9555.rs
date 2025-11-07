@@ -2,10 +2,10 @@ use core::cell::RefCell;
 use critical_section::Mutex;
 use defmt::info;
 use embassy_time::Timer;
-use esp_hal::Blocking;
 use esp_hal::gpio::interconnect::PeripheralOutput;
 use esp_hal::i2c::master::Config as I2cConfig;
 use esp_hal::i2c::master::{I2c, Instance};
+use esp_hal::Blocking;
 
 pub const XL9555_ADDR: u8 = 0x20; // 7-bit I2C 地址
 
@@ -14,7 +14,7 @@ static I2C: Mutex<RefCell<Option<I2c<Blocking>>>> = Mutex::new(RefCell::new(None
 // [KEY0, KEY1, KEY2, KEY3]
 static KEY_STATES: Mutex<RefCell<[bool; 4]>> = Mutex::new(RefCell::new([false; 4]));
 // 添加背光状态跟踪
-static BL_STATE: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(false));
+static BL_STATE: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(true));
 
 // 寄存器地址
 pub mod registers {
@@ -60,12 +60,14 @@ pub async fn init(
 
     // 配置XL9555 IO方向 (0表示输出，1表示输入)
     // P0全部配置为输入 (按键等)
-    // P1配置为输出，控制LCD相关功能
+    // P1配置为输出，但按键引脚配置为输入
+    // P1.0-P1.3 为输出（LCD控制）
+    // P1.4-P1.7 为输入（按键）
     i2c.write(XL9555_ADDR, &[registers::CONFIG_PORT_0, 0xFF])
         .expect("Failed to configure XL9555 PORT0");
-    i2c.write(XL9555_ADDR, &[registers::CONFIG_PORT_1, 0x00])
+    i2c.write(XL9555_ADDR, &[registers::CONFIG_PORT_1, 0xF0])
         .expect("Failed to configure XL9555 PORT1");
-        
+
     // 初始化输出端口状态
     i2c.write(XL9555_ADDR, &[registers::OUTPUT_PORT_0, 0x00])
         .ok();
@@ -75,27 +77,6 @@ pub async fn init(
     critical_section::with(|cs| {
         I2C.borrow_ref_mut(cs).replace(i2c);
     });
-}
-
-// 控制背光状态的函数
-pub fn set_backlight_state(i2c: &mut I2c<Blocking>, state: bool) {
-    // 读取当前端口1输出状态
-    let mut port1_data = [0u8];
-    if i2c
-        .write_read(XL9555_ADDR, &[registers::OUTPUT_PORT_1], &mut port1_data)
-        .is_ok()
-    {
-        // 根据状态设置背光引脚
-        let new_port1_data = if state {
-            port1_data[0] | (io_bits::LCD_BL_IO >> 8) as u8 // 设置P1.0为高电平
-        } else {
-            port1_data[0] & !((io_bits::LCD_BL_IO >> 8) as u8) // 设置P1.0为低电平
-        };
-
-        // 写回端口1输出
-        i2c.write(XL9555_ADDR, &[registers::OUTPUT_PORT_1, new_port1_data])
-            .ok();
-    }
 }
 
 // 控制 SPI LCD 电源状态的函数
@@ -165,10 +146,10 @@ pub async fn init_atk_md0240() {
     // 拉低RST引脚至少10微秒
     spi_lcd_reset(false);
     Timer::after_micros(10).await;
-    
+
     // 拉高RST引脚
     spi_lcd_reset(true);
-    
+
     // 延时120毫秒等待复位完成
     Timer::after_millis(120).await;
 }
