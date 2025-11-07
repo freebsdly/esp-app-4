@@ -52,7 +52,7 @@ embassy-time = { version = "0.5.0", features = ["defmt"] }
 embassy-sync = "0.7.2"
 
 # embedded
-embedded-hal = "1.0.0"
+#embedded-hal = "1.0.0"
 embedded-io = { version = "0.7.1", features = ["defmt"] }
 embedded-io-async = { version = "0.7.0", features = ["defmt"] }
 embedded-graphics = { version = "0.8.1", features = ["defmt"] }

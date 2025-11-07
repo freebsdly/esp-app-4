@@ -100,6 +100,7 @@ use esp_hal::spi::master::{Config, Spi};
 use esp_hal::spi::Mode;
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
+use {esp_backtrace as _, esp_println as _};
 
 mod button;
 mod lcd;
