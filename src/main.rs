@@ -1,3 +1,45 @@
+//! # ESP32-S3 正点原子开发板主程序
+//!
+//! 该程序演示了在正点原子 ESP32-S3 开发板上使用 XL9555 GPIO 扩展芯片控制 LCD 模块的功能。
+//!
+//! ## 硬件连接说明
+//!
+//! ### I2C 接口 (用于 XL9555 通信)
+//! - SDA: IO41 (GPIO41)
+//! - SCL: IO42 (GPIO42)
+//!
+//! ### SPI 接口 (用于 LCD 通信)
+//! - MOSI: IO11 (GPIO11)
+//! - SCK:  IO12 (GPIO12)
+//! - MISO: IO13 (GPIO13)
+//! - CS:   IO21 (GPIO21)
+//! - DC:   IO40 (GPIO40)
+//!
+//! ### XL9555 GPIO 扩展功能
+//! - P1.3: LCD 背光控制 (连接到 ATK-MD0240 模块的 PWR 引脚)
+//! - P1.2: LCD 复位控制
+//! - P1.7-P1.4: 按键输入 (KEY0-KEY3)
+//!
+//! ### 按键功能
+//! - KEY0: 未分配特定功能
+//! - KEY1: 切换 LCD 背光状态
+//! - KEY2: 未分配特定功能
+//! - KEY3: 未分配特定功能
+//!
+//! ## 功能说明
+//!
+//! 1. 初始化 ESP32-S3 系统时钟和外设
+//! 2. 初始化 XL9555 GPIO 扩展芯片
+//! 3. 初始化 ATK-MD0240 LCD 模块
+//! 4. 开启 LCD 背光
+//! 5. 启动按键检测任务
+//!
+//! ## 使用方法
+//!
+//! 1. 烧录程序到开发板
+//! 2. 程序启动后 LCD 背光会自动开启
+//! 3. 按下 KEY1 可切换 LCD 背光的开/关状态
+
 #![no_std]
 #![no_main]
 #![deny(
@@ -33,18 +75,21 @@ mod led;
 mod wifi;
 mod xl9555;
 
-// This creates a default app-descriptor required by the esp-idf bootloader.
-// For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
+/// 创建 esp-idf bootloader 所需的默认应用程序描述符
+/// 更多信息请参见: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[esp_rtos::main]
+/// 主函数
+///
+/// 系统启动入口点，负责初始化所有外设并启动相关任务
 async fn main(spawner: Spawner) {
     // generator version: 0.6.0
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
-    esp_alloc::heap_allocator!(size: 64 * 1024);
+    esp_alloc :: heap_allocator ! ( size : 64 * 1024 );
 
     let time_g0_timer = peripherals.TIMG0;
     let time_g0 = TimerGroup::new(time_g0_timer);
@@ -52,17 +97,22 @@ async fn main(spawner: Spawner) {
 
     info!("Embassy initialized!");
 
+    // 初始化 LED0 (GPIO1)
     led::led0_init(peripherals.GPIO1).await;
 
+    // 初始化 BOOT 按键 (GPIO0)
     button::boot_button_init(peripherals.GPIO0).await;
 
-    // Initialize WiFi
+    // 初始化 WiFi
     wifi::init(peripherals.WIFI).await;
     spawner
         .spawn(wifi::wifi_scan())
         .expect("failed to spawn wifi task");
 
+    // 初始化 XL9555 GPIO 扩展芯片
+    // 使用 I2C0 接口，SDA 连接 GPIO41，SCL 连接 GPIO42
     xl9555::init(peripherals.I2C0, peripherals.GPIO41, peripherals.GPIO42).await;
+    // 启动按键检测任务
     spawner
         .spawn(xl9555::read_keys())
         .expect("failed to spawn xl9555 task");
@@ -85,12 +135,14 @@ async fn main(spawner: Spawner) {
     // .with_dma(dma_channel)
     // .with_buffers(dma_rx_buf, dma_tx_buf);
 
-    let sck = peripherals.GPIO12;
-    let mos = peripherals.GPIO11;
-    let mis = peripherals.GPIO13;
-    let cs = peripherals.GPIO21;
-    let dc = peripherals.GPIO40;
+    // 配置 SPI 接口引脚
+    let sck = peripherals.GPIO12; // SPI 时钟线
+    let mos = peripherals.GPIO11; // SPI 主输出从输入线
+    let mis = peripherals.GPIO13; // SPI 主输入从输出线
+    let cs = peripherals.GPIO21; // SPI 片选线
+    let dc = peripherals.GPIO40; // LCD 数据/命令选择线
 
+    // 初始化 SPI 接口
     let mut spi = Spi::new(
         peripherals.SPI2,
         Config::default()
@@ -103,10 +155,12 @@ async fn main(spawner: Spawner) {
     .with_miso(mis)
     .with_cs(cs);
 
+    // 初始化 ATK-MD0240 LCD 模块
     xl9555::init_atk_md0240().await;
-    
-    // 开启 LCD 背光
+
     info!("Turning on LCD backlight");
+    // 开启 LCD 背光
+    // 通过 XL9555 的 P1.3 引脚控制 ATK-MD0240 模块的 PWR 引脚
     xl9555::set_lcd_backlight(true);
     info!("LCD backlight should be on now");
 }
