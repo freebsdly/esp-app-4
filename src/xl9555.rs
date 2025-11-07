@@ -22,10 +22,10 @@ pub mod registers {
     pub const INPUT_PORT_1: u8 = 1;
     pub const OUTPUT_PORT_0: u8 = 2;
     pub const OUTPUT_PORT_1: u8 = 3;
-    // pub const INVERSION_PORT_0: u8 = 4;
-    // pub const INVERSION_PORT_1: u8 = 5;
-    // pub const CONFIG_PORT_0: u8 = 6;
-    // pub const CONFIG_PORT_1: u8 = 7;
+    pub const INVERSION_PORT_0: u8 = 4;
+    pub const INVERSION_PORT_1: u8 = 5;
+    pub const CONFIG_PORT_0: u8 = 6;
+    pub const CONFIG_PORT_1: u8 = 7;
 }
 
 // IO 位定义 (P0: bit 0~7, P1: bit 8~15)
@@ -53,10 +53,24 @@ pub async fn init(
     sda: impl PeripheralOutput<'static>,
     scl: impl PeripheralOutput<'static>,
 ) {
-    let i2c = I2c::new(i2c, I2cConfig::default())
+    let mut i2c = I2c::new(i2c, I2cConfig::default())
         .expect("Failed to initialize I2C")
         .with_sda(sda)
         .with_scl(scl);
+
+    // 配置XL9555 IO方向 (0表示输出，1表示输入)
+    // P0全部配置为输入 (按键等)
+    // P1配置为输出，控制LCD相关功能
+    i2c.write(XL9555_ADDR, &[registers::CONFIG_PORT_0, 0xFF])
+        .expect("Failed to configure XL9555 PORT0");
+    i2c.write(XL9555_ADDR, &[registers::CONFIG_PORT_1, 0x00])
+        .expect("Failed to configure XL9555 PORT1");
+        
+    // 初始化输出端口状态
+    i2c.write(XL9555_ADDR, &[registers::OUTPUT_PORT_0, 0x00])
+        .ok();
+    i2c.write(XL9555_ADDR, &[registers::OUTPUT_PORT_1, 0x00])
+        .ok();
 
     critical_section::with(|cs| {
         I2C.borrow_ref_mut(cs).replace(i2c);
@@ -135,6 +149,16 @@ pub fn spi_lcd_reset(state: bool) {
     });
 }
 
+/// 控制 LCD 背光开关
+/// 根据描述，PWR 引脚带有下拉电阻，当引脚被拉低或悬空时背光关闭，当引脚被拉高时背光点亮
+pub fn set_lcd_backlight(state: bool) {
+    critical_section::with(|cs| {
+        let mut i2c = I2C.borrow_ref_mut(cs);
+        let i2c_ref = i2c.as_mut().unwrap();
+        set_spi_lcd_power_state(i2c_ref, state);
+    });
+}
+
 /// 初始化ATK-MD0240模块
 /// 执行硬件复位序列：RST引脚拉低至少10微秒，然后拉高并延时120毫秒等待复位完成
 pub async fn init_atk_md0240() {
@@ -203,7 +227,7 @@ pub async fn read_keys() {
                             // 切换背光状态
                             let mut bl_state = BL_STATE.borrow_ref_mut(cs);
                             *bl_state = !*bl_state;
-                            set_backlight_state(i2c_ref, *bl_state);
+                            set_spi_lcd_power_state(i2c_ref, *bl_state);
                             info!(
                                 "LCD backlight is now {}",
                                 if *bl_state { "ON" } else { "OFF" }

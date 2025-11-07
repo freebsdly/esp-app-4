@@ -6,6 +6,7 @@
     holding buffers for the duration of a data transfer."
 )]
 
+extern crate alloc;
 use core::cell::RefCell;
 use defmt::info;
 use display_interface_spi::SPIInterface;
@@ -17,13 +18,13 @@ use embedded_hal::spi::MODE_0;
 use esp_hal::clock::CpuClock;
 use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
 use esp_hal::gpio::Io;
-use esp_hal::spi::Mode;
 use esp_hal::spi::master::{Config, Spi, SpiDma};
+use esp_hal::spi::Mode;
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::{dma_buffers, peripherals};
-use mipidsi::Builder;
 use mipidsi::models::ST7789;
+use mipidsi::Builder;
 use {esp_backtrace as _, esp_println as _};
 
 mod button;
@@ -31,8 +32,6 @@ mod lcd;
 mod led;
 mod wifi;
 mod xl9555;
-
-extern crate alloc;
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -104,9 +103,10 @@ async fn main(spawner: Spawner) {
     .with_miso(mis)
     .with_cs(cs);
 
-    // LCD 复位序列 - 通过 XL9555 控制
-    xl9555::spi_lcd_reset(false);  // 复位引脚拉低
-    Timer::after(Duration::from_millis(10)).await;
-    xl9555::spi_lcd_reset(true);   // 复位引脚拉高
-    Timer::after(Duration::from_millis(10)).await;
+    xl9555::init_atk_md0240().await;
+    
+    // 开启 LCD 背光
+    info!("Turning on LCD backlight");
+    xl9555::set_lcd_backlight(true);
+    info!("LCD backlight should be on now");
 }
