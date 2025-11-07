@@ -161,24 +161,6 @@ async fn main(spawner: Spawner) {
         .spawn(xl9555::read_keys())
         .expect("failed to spawn xl9555 task");
 
-    // // DMA 缓冲区（发送为主，接收小）
-    // let dma_channel = peripherals.DMA_CH0;
-    // let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(32000);
-    //
-    // let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
-    //
-    // let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
-    //
-    // let mut spi = Spi::new(
-    //     peripherals.SPI2,
-    //     Config::default()
-    //         .with_frequency(Rate::from_khz(100))
-    //         .with_mode(Mode::_0),
-    // )
-    // .unwrap()
-    // .with_dma(dma_channel)
-    // .with_buffers(dma_rx_buf, dma_tx_buf);
-
     // 配置 SPI 接口引脚
     let sck = peripherals.GPIO12; // SPI 时钟线
     let mos = peripherals.GPIO11; // SPI 主输出从输入线

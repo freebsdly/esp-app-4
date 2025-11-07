@@ -50,6 +50,7 @@ static BL_STATE: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(true));
 /// - INVERSION_PORT_1: 0x05 - P1 端口极性反转寄存器
 /// - CONFIG_PORT_0: 0x06 - P0 端口方向配置寄存器
 /// - CONFIG_PORT_1: 0x07 - P1 端口方向配置寄存器
+#[allow(unused)]
 pub mod registers {
     pub const INPUT_PORT_0: u8 = 0;
     pub const INPUT_PORT_1: u8 = 1;
@@ -76,17 +77,18 @@ pub mod registers {
 /// - KEY1_IO: P1.6 - 按键 1 输入
 /// - KEY2_IO: P1.5 - 按键 2 输入
 /// - KEY3_IO: P1.4 - 按键 3 输入
+#[allow(unused)]
 pub mod io_bits {
-    // pub const AP_INT_IO: u16 = 0x0001; // P0.0
-    // pub const QMA_INT_IO: u16 = 0x0002; // P0.1
-    // pub const SPK_EN_IO: u16 = 0x0004; // P0.2
-    // pub const BEEP_IO: u16 = 0x0008; // P0.3
-    // pub const OV_PWDN_IO: u16 = 0x0010; // P0.4
-    // pub const OV_RESET_IO: u16 = 0x0020; // P0.5
-    // pub const GBC_LED_IO: u16 = 0x0040; // P0.6
-    // pub const GBC_KEY_IO: u16 = 0x0080; // P0.7
+    pub const AP_INT_IO: u16 = 0x0001; // P0.0
+    pub const QMA_INT_IO: u16 = 0x0002; // P0.1
+    pub const SPK_EN_IO: u16 = 0x0004; // P0.2
+    pub const BEEP_IO: u16 = 0x0008; // P0.3
+    pub const OV_PWDN_IO: u16 = 0x0010; // P0.4
+    pub const OV_RESET_IO: u16 = 0x0020; // P0.5
+    pub const GBC_LED_IO: u16 = 0x0040; // P0.6
+    pub const GBC_KEY_IO: u16 = 0x0080; // P0.7
     pub const LCD_BL_IO: u16 = 0x0100; // P1.0
-    // pub const CT_RST_IO: u16 = 0x0200; // P1.1
+    pub const CT_RST_IO: u16 = 0x0200; // P1.1
     pub const SLCD_RST_IO: u16 = 0x0400; // P1.2
     pub const SLCD_PWR_IO: u16 = 0x0800; // P1.3
     pub const KEY3_IO: u16 = 0x1000; // P1.4
@@ -211,47 +213,6 @@ pub fn spi_lcd_reset(state: bool) {
         let i2c_ref = i2c.as_mut().unwrap();
         set_spi_lcd_reset_state(i2c_ref, state);
     });
-}
-
-/// 公共接口函数：控制 LCD 复位状态
-///
-/// 通过该函数可以外部调用设置 LCD 的复位状态
-///
-/// # 参数
-/// * `state` - 复位状态，true 表示复位释放（高电平），false 表示复位（低电平）
-pub fn set_lcd_reset(state: bool) {
-    critical_section::with(|cs| {
-        let mut i2c = I2C.borrow_ref_mut(cs);
-        let i2c_ref = i2c.as_mut().unwrap();
-        set_spi_lcd_reset_state(i2c_ref, state);
-    });
-}
-
-/// 控制背光状态的函数
-///
-/// 直接操作 I2C 接口控制 XL9555 的 P1.0 引脚来控制 LCD 背光
-///
-/// # 参数
-/// * `i2c` - I2C 接口引用
-/// * `state` - 背光状态，true 表示开启，false 表示关闭
-pub fn set_backlight_state(i2c: &mut I2c<Blocking>, state: bool) {
-    // 读取当前端口1输出状态
-    let mut port1_data = [0u8];
-    if i2c
-        .write_read(XL9555_ADDR, &[registers::OUTPUT_PORT_1], &mut port1_data)
-        .is_ok()
-    {
-        // 根据状态设置背光引脚 (P1.0)
-        let new_port1_data = if state {
-            port1_data[0] | (io_bits::LCD_BL_IO >> 8) as u8 // 设置P1.0为高电平
-        } else {
-            port1_data[0] & !((io_bits::LCD_BL_IO >> 8) as u8) // 设置P1.0为低电平
-        };
-
-        // 写回端口1输出
-        i2c.write(XL9555_ADDR, &[registers::OUTPUT_PORT_1, new_port1_data])
-            .ok();
-    }
 }
 
 /// 公共接口函数：控制 LCD 背光开关
