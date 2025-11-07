@@ -135,6 +135,20 @@ pub fn spi_lcd_reset(state: bool) {
     });
 }
 
+/// 初始化ATK-MD0240模块
+/// 执行硬件复位序列：RST引脚拉低至少10微秒，然后拉高并延时120毫秒等待复位完成
+pub async fn init_atk_md0240() {
+    // 拉低RST引脚至少10微秒
+    spi_lcd_reset(false);
+    Timer::after_micros(10).await;
+    
+    // 拉高RST引脚
+    spi_lcd_reset(true);
+    
+    // 延时120毫秒等待复位完成
+    Timer::after_millis(120).await;
+}
+
 /**
 * 读取按键输入
 * 状态跟踪: 添加 KEY_STATES 全局变量记录每个按键的上一次状态
