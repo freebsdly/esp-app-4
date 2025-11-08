@@ -102,7 +102,7 @@ pub mod io_bits {
 /// - P0 端口配置为输入模式，用于按键检测
 /// - P1 端口部分配置为输出模式，用于 LCD 控制信号
 ///
-pub fn init() -> Result<(), I2cError> {
+pub async fn init() -> Result<(), I2cError> {
     i2c::with_i2c(|i2c| {
         // 配置XL9555 IO方向 (0表示输出，1表示输入)
         // P0全部配置为输入 (按键等)
@@ -187,7 +187,7 @@ pub fn set_spi_lcd_reset_state(i2c: &mut I2c<Blocking>, state: bool) {
 }
 
 // 添加公共函数用于外部调用
-pub fn spi_lcd_reset(state: bool) {
+pub async fn spi_lcd_reset(state: bool) {
     i2c::with_i2c_mut(|i2c| {
         set_spi_lcd_reset_state(i2c, state);
     });
@@ -200,7 +200,7 @@ pub fn spi_lcd_reset(state: bool) {
 ///
 /// # 参数
 /// * `state` - 背光状态，true 表示开启背光，false 表示关闭背光
-pub fn set_lcd_backlight(state: bool) {
+pub async fn set_lcd_backlight(state: bool) {
     i2c::with_i2c_mut(|i2c| {
         set_spi_lcd_power_state(i2c, state);
     });
@@ -210,11 +210,11 @@ pub fn set_lcd_backlight(state: bool) {
 /// 执行硬件复位序列：RST引脚拉低至少10微秒，然后拉高并延时120毫秒等待复位完成
 pub async fn init_atk_md0240() {
     // 拉低RST引脚至少10微秒
-    spi_lcd_reset(false);
+    spi_lcd_reset(false).await;
     Timer::after_micros(10).await;
 
     // 拉高RST引脚
-    spi_lcd_reset(true);
+    spi_lcd_reset(true).await;
 
     // 延时120毫秒等待复位完成
     Timer::after_millis(120).await;

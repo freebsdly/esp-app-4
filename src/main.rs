@@ -148,7 +148,10 @@ async fn main(spawner: Spawner) {
     // 初始化 XL9555 GPIO 扩展芯片
     // 使用 I2C0 接口，SDA 连接 GPIO41，SCL 连接 GPIO42
     i2c::init(peripherals.I2C0, peripherals.GPIO41, peripherals.GPIO42).await;
-    xl9555::init().unwrap();
+    let result = xl9555::init().await;
+    if result.is_err() {
+        info!("Failed to initialize XL9555 GPIO expander");
+    }
     // 启动按键检测任务
     spawner
         .spawn(xl9555::read_keys())
@@ -179,6 +182,6 @@ async fn main(spawner: Spawner) {
     info!("Turning on LCD backlight");
     // 开启 LCD 背光
     // 通过 XL9555 的 P1.3 引脚控制 ATK-MD0240 模块的 PWR 引脚
-    xl9555::set_lcd_backlight(true);
+    xl9555::set_lcd_backlight(true).await;
     info!("LCD backlight should be on now");
 }
