@@ -177,72 +177,106 @@ async fn main(spawner: Spawner) {
         if result.is_err() {
             warn!("Failed to set LCD backlight");
         }
-    }
+        
+        // 等待一段时间确保硬件完全准备好
+        embassy_time::Timer::after_millis(100).await;
+        
+        // 配置 SPI 接口引脚
+        let sck = peripherals.GPIO12; // SPI 时钟线
+        let mosi = peripherals.GPIO11; // SPI 主输出从输入线
+        let miso = peripherals.GPIO13; // SPI 主输入从输出线
+        let cs = peripherals.GPIO21; // SPI 片选线
+        let dc = peripherals.GPIO40; // LCD 数据/命令选择线
 
-    // 配置 SPI 接口引脚
-    let sck = peripherals.GPIO12; // SPI 时钟线
-    let mosi = peripherals.GPIO11; // SPI 主输出从输入线
-    let miso = peripherals.GPIO13; // SPI 主输入从输出线
-    let cs = peripherals.GPIO21; // SPI 片选线
-    let dc = peripherals.GPIO40; // LCD 数据/命令选择线
+        let result = spi::init(peripherals.SPI2, sck, mosi, miso).await;
 
-    let result = spi::init(peripherals.SPI2, sck, mosi, miso).await;
-
-    if result.is_err() {
-        warn!("Failed to initialize SPI interface");
-    } else {
-        // 初始化并使用ST7789显示屏
-        let mut guard = spi::SPI.lock().await;
-        let spi_ref = guard.take().unwrap();
-
-        // 创建ST7789驱动实例 (240x320 是ST7789V常见的分辨率)
-        // 使用GPIO14作为RST引脚，确保硬件复位
-        let mut display = st7789::ST7789::new(
-            spi_ref,
-            dc,
-            Some(peripherals.GPIO14), // 使用硬件复位
-            240,                      // 宽度
-            320,                      // 高度
-        );
-
-        // 初始化显示屏
-        let init_result = display.init();
-        if init_result.is_err() {
-            warn!(
-                "Failed to initialize ST7789 display: {:?}",
-                init_result.err()
-            );
+        if result.is_err() {
+            warn!("Failed to initialize SPI interface");
         } else {
-            info!("ST7789 display initialized successfully");
-            
-            // 设置显示方向为纵向
-            let orient_result = display.set_orientation(st7789::Orientation::Portrait);
-            if orient_result.is_err() {
-                warn!("Failed to set display orientation");
-            }
+            // 初始化并使用ST7789显示屏
+            let mut guard = spi::SPI.lock().await;
+            let spi_ref = guard.take().unwrap();
 
-            // 使用循环持续检查颜色状态并更新屏幕显示
-            loop {
-                {
-                    let current_color = button::CURRENT_COLOR.lock().await;
-                    let color = match *current_color {
-                        button::DisplayColor::Red => Rgb565::RED,
-                        button::DisplayColor::Green => Rgb565::GREEN,
-                        button::DisplayColor::Blue => Rgb565::BLUE,
-                        button::DisplayColor::White => Rgb565::WHITE,
-                        button::DisplayColor::Black => Rgb565::BLACK,
-                    };
-                    drop(current_color); // 释放锁
-                    
-                    // 填充屏幕为当前颜色
-                    let fill_result = display.fill_screen(color);
-                    if fill_result.is_err() {
-                        warn!("Failed to fill screen with color");
-                    }
-                }
+            // 创建ST7789驱动实例 (240x320 是ST7789V常见的分辨率)
+            // 使用GPIO14作为RST引脚，确保硬件复位
+            let mut display = st7789::ST7789::new(
+                spi_ref,
+                dc,
+                Some(peripherals.GPIO14), // 使用硬件复位
+                240,                      // 宽度
+                320,                      // 高度
+            );
+
+            // 初始化显示屏
+            info!("Initializing ST7789 display...");
+            let init_result = display.init();
+            if init_result.is_err() {
+                warn!(
+                    "Failed to initialize ST7789 display: {:?}",
+                    init_result.err()
+                );
+            } else {
+                info!("ST7789 display initialized successfully");
                 
-                // 等待一段时间再检查颜色状态
-                embassy_time::Timer::after_millis(100).await;
+                // 设置显示方向为纵向
+                info!("Setting display orientation...");
+                let orient_result = display.set_orientation(st7789::Orientation::Portrait);
+                if orient_result.is_err() {
+                    warn!("Failed to set display orientation");
+                } else {
+                    info!("Display orientation set successfully");
+                }
+
+                // 先尝试填充红色屏幕
+                info!("Filling screen with red color...");
+                let fill_result = display.fill_screen(Rgb565::RED);
+                if fill_result.is_err() {
+                    warn!("Failed to fill screen with red color: {:?}", fill_result.err());
+                } else {
+                    info!("Screen filled with red color successfully");
+                }
+
+                // 等待一段时间观察效果
+                embassy_time::Timer::after_millis(2000).await;
+
+                // 使用循环持续检查颜色状态并更新屏幕显示
+                loop {
+                    {
+                        let current_color = button::CURRENT_COLOR.lock().await;
+                        let color = match *current_color {
+                            button::DisplayColor::Red => {
+                                info!("Switching to RED");
+                                Rgb565::RED
+                            },
+                            button::DisplayColor::Green => {
+                                info!("Switching to GREEN");
+                                Rgb565::GREEN
+                            },
+                            button::DisplayColor::Blue => {
+                                info!("Switching to BLUE");
+                                Rgb565::BLUE
+                            },
+                            button::DisplayColor::White => {
+                                info!("Switching to WHITE");
+                                Rgb565::WHITE
+                            },
+                            button::DisplayColor::Black => {
+                                info!("Switching to BLACK");
+                                Rgb565::BLACK
+                            },
+                        };
+                        drop(current_color); // 释放锁
+                        
+                        // 填充屏幕为当前颜色
+                        let fill_result = display.fill_screen(color);
+                        if fill_result.is_err() {
+                            warn!("Failed to fill screen with color: {:?}", fill_result.err());
+                        }
+                    }
+                    
+                    // 等待一段时间再检查颜色状态
+                    embassy_time::Timer::after_millis(1000).await;
+                }
             }
         }
     }

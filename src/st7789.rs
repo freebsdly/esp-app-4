@@ -100,16 +100,16 @@ impl<'d> ST7789<'d> {
             rst.set_low();
             self.delay.delay_micros(10);
             rst.set_high();
-            self.delay.delay_millis(120);
+            self.delay.delay_millis(150); // 增加复位时间到150ms确保完全复位
         } else {
             // Software reset if no hardware reset pin
             self.write_command(CMD_SWRESET, &[])?;
-            self.delay.delay_millis(120);
+            self.delay.delay_millis(150);
         }
 
         // Exit sleep mode
         self.write_command(CMD_SLPOUT, &[])?;
-        self.delay.delay_millis(120);
+        self.delay.delay_millis(150); // 增加延迟确保完全退出睡眠模式
 
         // Set color mode to 16-bit RGB565
         self.write_command(CMD_COLMOD, &[0x55])?; // 0x55 = 16-bit/pixel RGB565
@@ -118,7 +118,7 @@ impl<'d> ST7789<'d> {
         // Configure display orientation and RGB mode
         // MX=0, MY=0, MV=0: Scan from left to right, top to bottom
         // Using RGB order as specified for ST7789V
-        self.write_command(CMD_MADCTL, &[MADCTL_RGB])?;
+        self.write_command(CMD_MADCTL, &[MADCTL_RGB | MADCTL_ML])?; // 添加ML位确保正确扫描方向
 
         // Set frame rate
         self.write_command(CMD_FCS, &[0xC0])?;
@@ -139,9 +139,13 @@ impl<'d> ST7789<'d> {
             ],
         )?;
 
+        // Display inversion on - 有些屏幕需要开启显示反转才能正常显示颜色
+        self.write_command(CMD_INVON, &[])?;
+        self.delay.delay_millis(10);
+
         // Turn on display
         self.write_command(CMD_DISPON, &[])?;
-        self.delay.delay_millis(120);
+        self.delay.delay_millis(150); // 增加延迟确保显示完全开启
 
         Ok(())
     }
@@ -238,9 +242,26 @@ impl<'d> ST7789<'d> {
         // Prepare color data with byte swapping for RGB565 format
         let color_data = [(color >> 8) as u8, (color & 0xFF) as u8];
         
-        // Optimized write process, batch write color data
+        // 使用批量写入优化性能
+        // 创建足够大的缓冲区来保存所有像素数据
+        let mut buffer = [0u8; 2048]; // 1024个像素的数据
+        let mut buffer_index = 0;
+        
         for _ in 0..count {
-            self.spi.write(&color_data)?;
+            buffer[buffer_index] = color_data[0];
+            buffer[buffer_index + 1] = color_data[1];
+            buffer_index += 2;
+            
+            // 当缓冲区满时，写入数据
+            if buffer_index >= buffer.len() {
+                self.spi.write(&buffer[..buffer_index])?;
+                buffer_index = 0;
+            }
+        }
+        
+        // 写入剩余的数据
+        if buffer_index > 0 {
+            self.spi.write(&buffer[..buffer_index])?;
         }
         
         Ok(())
