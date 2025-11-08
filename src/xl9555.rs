@@ -10,6 +10,7 @@ use esp_hal::Blocking;
 /// - LCD 背光控制
 /// - LCD 复位控制
 /// - 按键输入检测
+/// - 蜂鸣器控制
 ///
 /// XL9555 具有 16 个 GPIO 引脚，分为两个 8 位端口：
 /// - P0 端口：P0.0-P0.7 (按键连接在此端口)
@@ -56,7 +57,7 @@ pub mod registers {
 ///
 /// 定义 XL9555 各个 IO 引脚的功能分配
 /// IO 引脚分为两组：
-/// - P0 端口（P0.0-P0.7）：主要用于按键输入
+/// - P0 端口（P0.0-P0.7）：主要用于按键输入和蜂鸣器输出
 /// - P1 端口（P1.0-P1.7）：主要用于 LCD 控制信号输出
 ///
 /// 引脚分配说明：
@@ -67,6 +68,7 @@ pub mod registers {
 /// - KEY1_IO: P1.6 - 按键 1 输入
 /// - KEY2_IO: P1.5 - 按键 2 输入
 /// - KEY3_IO: P1.4 - 按键 3 输入
+/// - BEEP_IO: P0.3 - 蜂鸣器控制输出
 #[allow(unused)]
 pub mod io_bits {
     pub const AP_INT_IO: u16 = 0x0001; // P0.0
@@ -90,26 +92,21 @@ pub mod io_bits {
 /// 初始化 XL9555 芯片
 ///
 /// 配置 I2C 接口并设置 GPIO 引脚方向：
-/// - P0 端口配置为输入模式，用于按键检测
+/// - P0 端口配置为输入模式（除BEEP_IO外），用于按键检测和蜂鸣器控制
 /// - P1 端口部分配置为输出模式，用于 LCD 控制信号
 ///
 pub async fn init() -> Result<(), I2cError> {
     i2c::with_i2c(|i2c_ref| {
         // 配置XL9555 IO方向 (0表示输出，1表示输入)
-        // P0全部配置为输入 (按键等)
-        // P1配置为输出，但按键引脚配置为输入
-        // P1.0-P1.3 为输出（LCD控制）
-        // P1.4-P1.7 为输入（按键）
-        // 配置 P0 端口为输入模式
-        // P0 端口连接按键，需要配置为输入模式以检测按键状态
-        i2c_ref.write(XL9555_ADDR, &[registers::CONFIG_PORT_0, 0xFF])?;
-        // 配置 P1 端口方向
-        // P1 端口混合使用，低 4 位用于 LCD 控制（输出），高 4 位用于按键（输入）
-        // 0xF0 表示高 4 位为输入(1)，低 4 位为输出(0)
+        // P0端口除了BEEP_IO(P0.3)配置为输出外，其余配置为输入 (按键等)
+        // P1端口低4位用于LCD控制（输出），高4位用于按键（输入）
+        // 0xF7 表示 P0.3 为输出(0)，其他 P0 引脚为输入(1)
+        i2c_ref.write(XL9555_ADDR, &[registers::CONFIG_PORT_0, 0xF7])?;
+        // 0xF0 表示 P1.0-P1.3 为输出(0)，P1.4-P1.7 为输入(1)
         i2c_ref.write(XL9555_ADDR, &[registers::CONFIG_PORT_1, 0xF0])?;
 
         // 初始化 P0 端口输出状态
-        // 将 P0 端口输出寄存器初始化为 0
+        // 将 P0 端口输出寄存器初始化为 0，关闭蜂鸣器
         i2c_ref
             .write(XL9555_ADDR, &[registers::OUTPUT_PORT_0, 0x00])
             .ok();
@@ -208,6 +205,31 @@ pub async fn spi_lcd_reset(state: bool) -> Result<(), I2cError> {
 /// * `state` - 背光状态，true 表示开启背光，false 表示关闭背光
 pub async fn set_lcd_backlight(state: bool) -> Result<(), I2cError> {
     i2c::with_i2c(|i2c_ref| set_spi_lcd_power_state(i2c_ref, state)).await
+}
+
+/// 公共接口函数：控制蜂鸣器开关
+///
+/// 通过该函数可以外部调用设置蜂鸣器的开关状态
+/// 控制的是 XL9555 的 P0.3 引脚
+///
+/// # 参数
+/// * `state` - 蜂鸣器状态，true 表示开启蜂鸣器，false 表示关闭蜂鸣器
+pub async fn set_beep(state: bool) -> Result<(), I2cError> {
+    i2c::with_i2c(|i2c_ref| {
+        // 读取当前端口0输出状态
+        let mut port0_data = [0u8];
+        i2c_ref.write_read(XL9555_ADDR, &[registers::OUTPUT_PORT_0], &mut port0_data)?;
+        
+        // 根据状态设置蜂鸣器引脚 (P0.3)
+        let new_port0_data = if state {
+            port0_data[0] | (io_bits::BEEP_IO) as u8 // 设置P0.3为高电平
+        } else {
+            port0_data[0] & !((io_bits::BEEP_IO) as u8) // 设置P0.3为低电平
+        };
+
+        // 写回端口0输出
+        i2c_ref.write(XL9555_ADDR, &[registers::OUTPUT_PORT_0, new_port0_data])
+    }).await
 }
 
 /// 初始化ATK-MD0240模块

@@ -54,6 +54,8 @@ static BL_STATE: EmbassyMutex<CriticalSectionRawMutex, bool> = EmbassyMutex::new
 // 添加屏幕颜色状态跟踪
 pub static CURRENT_COLOR: EmbassyMutex<CriticalSectionRawMutex, DisplayColor> =
     EmbassyMutex::new(DisplayColor::Red);
+// 添加蜂鸣器状态跟踪
+static BEEP_STATE: EmbassyMutex<CriticalSectionRawMutex, bool> = EmbassyMutex::new(false);
 
 pub async fn boot_button_init(button: impl InputPin + 'static) {
     let mut boot_button = Input::new(button, InputConfig::default());
@@ -92,6 +94,69 @@ fn toggle_lcd_backlight(i2c_ref: &mut I2c<Blocking>) -> Result<(), I2cError> {
     Ok(())
 }
 
+/// 控制蜂鸣器状态
+///
+/// 该函数负责控制蜂鸣器的开/关状态，并更新相关的状态跟踪变量
+///
+/// # 参数
+/// * `i2c_ref` - I2C接口引用，用于与XL9555芯片通信
+/// * `state` - 蜂鸣器状态，true表示开启，false表示关闭
+///
+/// # 返回值
+/// * `Result<(), esp_hal::i2c::Error>` - 操作结果，成功或错误信息
+fn set_beep_state(i2c_ref: &mut I2c<Blocking>, state: bool) -> Result<(), I2cError> {
+    // 读取当前端口0输出状态
+    let mut port0_data = [0u8];
+    i2c_ref.write_read(
+        crate::xl9555::XL9555_ADDR,
+        &[crate::xl9555::registers::OUTPUT_PORT_0],
+        &mut port0_data,
+    )?;
+    
+    // 根据状态设置蜂鸣器引脚 (P0.3)
+    let new_port0_data = if state {
+        port0_data[0] | (io_bits::BEEP_IO) as u8 // 设置P0.3为高电平
+    } else {
+        port0_data[0] & !((io_bits::BEEP_IO) as u8) // 设置P0.3为低电平
+    };
+
+    // 写回端口0输出
+    i2c_ref.write(
+        crate::xl9555::XL9555_ADDR,
+        &[crate::xl9555::registers::OUTPUT_PORT_0, new_port0_data],
+    )
+}
+
+/// 切换蜂鸣器状态
+///
+/// 该函数负责切换蜂鸣器的开/关状态，并更新相关的状态跟踪变量
+///
+/// # 参数
+/// * `i2c_ref` - I2C接口引用，用于与XL9555芯片通信
+///
+/// # 返回值
+/// * `Result<(), esp_hal::i2c::Error>` - 操作结果，成功或错误信息
+fn toggle_beep(i2c_ref: &mut I2c<Blocking>) -> Result<(), I2cError> {
+    // 获取当前蜂鸣器状态并切换
+    let mut beep_state = BEEP_STATE.try_lock().unwrap();
+    let new_beep_state = !*beep_state;
+    *beep_state = new_beep_state;
+    drop(beep_state); // 释放锁，以便在下面的调用中不会死锁
+
+    // 设置新的蜂鸣器状态
+    let result = set_beep_state(i2c_ref, new_beep_state);
+    if result.is_err() {
+        return Err(result.unwrap_err());
+    }
+
+    info!(
+        "BEEP is now {}",
+        if new_beep_state { "OFF" } else { "ON" }  // 修正逻辑：低电平触发蜂鸣器
+    );
+
+    Ok(())
+}
+
 /// 按键输入检测任务
 ///
 /// 该异步任务负责持续检测 XL9555 连接的按键状态
@@ -102,7 +167,7 @@ fn toggle_lcd_backlight(i2c_ref: &mut I2c<Blocking>) -> Result<(), I2cError> {
 /// - KEY0: 未分配特定功能
 /// - KEY1: 切换 LCD 背光状态
 /// - KEY2: 切换屏幕颜色 (红->绿->蓝->白->黑->红...)
-/// - KEY3: 未分配特定功能
+/// - KEY3: 切换蜂鸣器状态
 ///
 /// 读取按键输入
 /// 状态跟踪: 添加 KEY_STATES 全局变量记录每个按键的上一次状态
@@ -167,7 +232,19 @@ pub async fn read_keys() {
                             info!("Display color switched to {:?}", *current_color);
                             key_states = KEY_STATES.try_lock().unwrap(); // 重新获取锁
                         }
-                        3 => info!("KEY3 pressed"),
+                        3 => {
+                            info!("KEY3 pressed - toggling BEEP");
+                            // 切换蜂鸣器状态
+                            drop(key_states); // 释放锁，以便获取蜂鸣器状态锁
+                            let result = toggle_beep(i2c_ref);
+                            if result.is_err() {
+                                error!(
+                                    "Failed to toggle BEEP state: {}",
+                                    result.unwrap_err()
+                                );
+                            }
+                            key_states = KEY_STATES.try_lock().unwrap(); // 重新获取锁
+                        },
                         _ => {}
                     }
                 }
