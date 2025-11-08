@@ -1,7 +1,4 @@
 use crate::i2c;
-use core::cell::RefCell;
-use critical_section::Mutex;
-use defmt::{error, info};
 use embassy_time::Timer;
 use esp_hal::i2c::master::Error as I2cError;
 use esp_hal::i2c::master::I2c;
@@ -25,12 +22,6 @@ use esp_hal::Blocking;
 /// 3. 调用 [set_lcd_backlight] 函数控制 LCD 背光
 /// 4. 启动 [read_keys] 任务检测按键输入
 pub const XL9555_ADDR: u8 = 0x20; // 7-bit I2C 地址
-
-// 在全局静态变量中添加按键状态跟踪
-// [KEY0, KEY1, KEY2, KEY3]
-static KEY_STATES: Mutex<RefCell<[bool; 4]>> = Mutex::new(RefCell::new([false; 4]));
-// 添加背光状态跟踪
-static BL_STATE: Mutex<RefCell<bool>> = Mutex::new(RefCell::new(true));
 
 /// 寄存器地址定义
 ///
@@ -129,6 +120,34 @@ pub async fn init() -> Result<(), I2cError> {
     .await
 }
 
+/// 从 XL9555 的输入端口读取数据
+///
+/// 该函数读取 XL9555 芯片的两个输入端口（P0 和 P1）的数据。
+/// P0 端口通常用于按键输入检测，P1 端口用于其他输入信号。
+///
+/// # 参数
+/// * `i2c_ref` - I2C 接口引用
+///
+/// # 返回值
+/// 返回包含两个端口数据的元组 (port0_data, port1_data)
+pub(crate) fn read_input_ports(i2c_ref: &mut I2c<Blocking>) -> ([u8; 1], [u8; 1]) {
+    // 读取 P0 端口输入状态
+    // 通过读取输入端口寄存器获取 P0 端口当前的电平状态
+    let mut port0_data = [0u8];
+    // 读取 P1 端口输入状态
+    // 通过读取输入端口寄存器获取 P1 端口当前的电平状态
+    let mut port1_data = [0u8];
+
+    i2c_ref
+        .write_read(XL9555_ADDR, &[registers::INPUT_PORT_0], &mut port0_data)
+        .ok();
+    i2c_ref
+        .write_read(XL9555_ADDR, &[registers::INPUT_PORT_1], &mut port1_data)
+        .ok();
+
+    (port0_data, port1_data)
+}
+
 // 控制 SPI LCD 电源状态
 ///
 /// 操作 I2C 接口控制 XL9555 的 P1.3 引脚来控制 LCD 电源（背光）
@@ -204,105 +223,4 @@ pub async fn init_atk_md0240() -> Result<(), I2cError> {
     // 延时120毫秒等待复位完成
     Timer::after_millis(120).await;
     Ok(())
-}
-
-/// 按键输入检测任务
-///
-/// 该异步任务负责持续检测 XL9555 连接的按键状态
-/// 使用轮询方式每 50 毫秒检测一次按键状态
-/// 实现边缘检测，确保按键按下时只触发一次操作
-///
-/// 按键功能分配：
-/// - KEY0: 未分配特定功能
-/// - KEY1: 切换 LCD 背光状态
-/// - KEY2: 未分配特定功能
-/// - KEY3: 未分配特定功能
-///
-/// 读取按键输入
-/// 状态跟踪: 添加 KEY_STATES 全局变量记录每个按键的上一次状态
-/// 边缘检测: 只有当按键从释放状态(高电平)变为按下状态(低电平)时才触发事件
-/// 状态更新: 每次循环结束后更新按键状态数组
-/// 这样修改后，即使按键持续按下也只会触发一次日志输出，直到按键释放后再次按下才会重新触发
-/// 硬件连接：
-/// iic_int (XL9555中断引脚) 连接到 ESP32 的 GPIO0
-/// GPIO0 同时也是 BOOT_BUTTON 的引脚
-/// 中断触发机制：
-/// 当 KEY0-KEY3 按下时，XL9555 通过 iic_int 引脚产生中断信号
-/// 该信号传递到 GPIO0，触发了已注册的中断处理程序
-/// 中断处理程序中会切换 LED 状态
-///
-#[embassy_executor::task]
-pub async fn read_keys() {
-    loop {
-        i2c::with_i2c(|i2c_ref| {
-            // 读取 P0 端口输入状态
-            // 通过读取输入端口寄存器获取 P0 端口当前的电平状态
-            let mut port0_data = [0u8];
-            // 读取 P1 端口输入状态
-            // 通过读取输入端口寄存器获取 P1 端口当前的电平状态
-            let mut port1_data = [0u8];
-
-            i2c_ref
-                .write_read(XL9555_ADDR, &[registers::INPUT_PORT_0], &mut port0_data)
-                .ok();
-            i2c_ref
-                .write_read(XL9555_ADDR, &[registers::INPUT_PORT_1], &mut port1_data)
-                .ok();
-
-            // 组合按键值
-            //将 P1 和 P0 端口的值组合成一个 16 位值用于按键检测
-            // 高 8 位来自 P1 端口，低 8 位来自 P0 端口
-            let key_value: u16 = (port1_data[0] as u16) << 8 | (port0_data[0] as u16);
-
-            // 获取当前按键状态（低电平表示按下）
-            let current_states = [
-                (key_value & io_bits::KEY0_IO) == 0,
-                (key_value & io_bits::KEY1_IO) == 0,
-                (key_value & io_bits::KEY2_IO) == 0,
-                (key_value & io_bits::KEY3_IO) == 0,
-            ];
-
-            // 检查按键状态变化
-            critical_section::with(|cs| {
-                let mut key_states = KEY_STATES.borrow_ref_mut(cs);
-                for i in 0..4 {
-                    if current_states[i] && !key_states[i] {
-                        // 按键刚被按下
-                        match i {
-                            0 => info!("KEY0 pressed"),
-                            1 => {
-                                info!("KEY1 pressed - toggling LCD backlight");
-                                // 切换背光状态
-                                let mut bl_state = BL_STATE.borrow_ref_mut(cs);
-                                *bl_state = !*bl_state;
-                                let result = set_spi_lcd_power_state(i2c_ref, *bl_state);
-                                if result.is_err() {
-                                    error!(
-                                        "Failed to set LCD backlight state: {}",
-                                        result.unwrap_err()
-                                    );
-                                }
-                                info!(
-                                    "LCD backlight is now {}",
-                                    if *bl_state { "ON" } else { "OFF" }
-                                );
-                            }
-                            2 => info!("KEY2 pressed"),
-                            3 => info!("KEY3 pressed"),
-                            _ => {}
-                        }
-                    }
-                }
-
-                // 更新按键状态
-                *key_states = current_states;
-            });
-
-            Ok(())
-        })
-        .await
-        .ok();
-
-        Timer::after_millis(50).await;
-    }
 }

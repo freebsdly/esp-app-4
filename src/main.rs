@@ -161,7 +161,7 @@ async fn main(spawner: Spawner) {
         info!("Failed to initialize XL9555 GPIO expander");
     } else {
         // 启动按键检测任务
-        let result = spawner.spawn(xl9555::read_keys());
+        let result = spawner.spawn(button::read_keys());
         if result.is_err() {
             warn!("Failed to spawn xl9555 task");
         }
@@ -200,8 +200,8 @@ async fn main(spawner: Spawner) {
             spi_ref,
             dc,
             Option::<esp_hal::gpio::AnyPin>::None, // 使用软件复位
-            320,                                   // 宽度
-            240,                                   // 高度
+            240,                                   // 宽度
+            320,                                   // 高度
         );
 
         // 初始化显示屏
