@@ -148,7 +148,7 @@ async fn main(spawner: Spawner) {
     // 初始化 XL9555 GPIO 扩展芯片
     // 使用 I2C0 接口，SDA 连接 GPIO41，SCL 连接 GPIO42
     i2c::init(peripherals.I2C0, peripherals.GPIO41, peripherals.GPIO42).await;
-    i2c::with_i2c(|i2c| xl9555::init(i2c)).unwrap();
+    xl9555::init().unwrap();
     // 启动按键检测任务
     spawner
         .spawn(xl9555::read_keys())

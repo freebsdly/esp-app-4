@@ -102,33 +102,32 @@ pub mod io_bits {
 /// - P0 端口配置为输入模式，用于按键检测
 /// - P1 端口部分配置为输出模式，用于 LCD 控制信号
 ///
-/// # 参数
-/// * `i2c` - I2C 实例
-///
-pub fn init(i2c: &mut I2c<Blocking>) -> Result<(), I2cError> {
-    // 配置XL9555 IO方向 (0表示输出，1表示输入)
-    // P0全部配置为输入 (按键等)
-    // P1配置为输出，但按键引脚配置为输入
-    // P1.0-P1.3 为输出（LCD控制）
-    // P1.4-P1.7 为输入（按键）
-    // 配置 P0 端口为输入模式
-    // P0 端口连接按键，需要配置为输入模式以检测按键状态
-    i2c.write(XL9555_ADDR, &[registers::CONFIG_PORT_0, 0xFF])?;
-    // 配置 P1 端口方向
-    // P1 端口混合使用，低 4 位用于 LCD 控制（输出），高 4 位用于按键（输入）
-    // 0xF0 表示高 4 位为输入(1)，低 4 位为输出(0)
-    i2c.write(XL9555_ADDR, &[registers::CONFIG_PORT_1, 0xF0])?;
+pub fn init() -> Result<(), I2cError> {
+    i2c::with_i2c(|i2c| {
+        // 配置XL9555 IO方向 (0表示输出，1表示输入)
+        // P0全部配置为输入 (按键等)
+        // P1配置为输出，但按键引脚配置为输入
+        // P1.0-P1.3 为输出（LCD控制）
+        // P1.4-P1.7 为输入（按键）
+        // 配置 P0 端口为输入模式
+        // P0 端口连接按键，需要配置为输入模式以检测按键状态
+        i2c.write(XL9555_ADDR, &[registers::CONFIG_PORT_0, 0xFF])?;
+        // 配置 P1 端口方向
+        // P1 端口混合使用，低 4 位用于 LCD 控制（输出），高 4 位用于按键（输入）
+        // 0xF0 表示高 4 位为输入(1)，低 4 位为输出(0)
+        i2c.write(XL9555_ADDR, &[registers::CONFIG_PORT_1, 0xF0])?;
 
-    // 初始化 P0 端口输出状态
-    // 将 P0 端口输出寄存器初始化为 0
-    i2c.write(XL9555_ADDR, &[registers::OUTPUT_PORT_0, 0x00])
-        .ok();
-    // 初始化 P1 端口输出状态
-    // 将 P1 端口输出寄存器初始化为 0
-    i2c.write(XL9555_ADDR, &[registers::OUTPUT_PORT_1, 0x00])
-        .ok();
+        // 初始化 P0 端口输出状态
+        // 将 P0 端口输出寄存器初始化为 0
+        i2c.write(XL9555_ADDR, &[registers::OUTPUT_PORT_0, 0x00])
+            .ok();
+        // 初始化 P1 端口输出状态
+        // 将 P1 端口输出寄存器初始化为 0
+        i2c.write(XL9555_ADDR, &[registers::OUTPUT_PORT_1, 0x00])
+            .ok();
 
-    Ok(())
+        Ok(())
+    })
 }
 
 // 控制 SPI LCD 电源状态
@@ -189,11 +188,9 @@ pub fn set_spi_lcd_reset_state(i2c: &mut I2c<Blocking>, state: bool) {
 
 // 添加公共函数用于外部调用
 pub fn spi_lcd_reset(state: bool) {
-    i2c::with_i2c(|i2c| {
+    i2c::with_i2c_mut(|i2c| {
         set_spi_lcd_reset_state(i2c, state);
-        Ok(())
-    })
-    .unwrap();
+    });
 }
 
 /// 公共接口函数：控制 LCD 背光开关
@@ -204,11 +201,9 @@ pub fn spi_lcd_reset(state: bool) {
 /// # 参数
 /// * `state` - 背光状态，true 表示开启背光，false 表示关闭背光
 pub fn set_lcd_backlight(state: bool) {
-    i2c::with_i2c(|i2c| {
+    i2c::with_i2c_mut(|i2c| {
         set_spi_lcd_power_state(i2c, state);
-        Ok(())
-    })
-    .unwrap();
+    });
 }
 
 /// 初始化ATK-MD0240模块
