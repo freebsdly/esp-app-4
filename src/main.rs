@@ -93,7 +93,8 @@
 )]
 
 extern crate alloc;
-use defmt::info;
+
+use defmt::{info, warn};
 use embassy_executor::Spawner;
 use esp_hal::clock::CpuClock;
 use esp_hal::spi::master::{Config, Spi};
@@ -145,10 +146,10 @@ async fn main(spawner: Spawner) {
 
     // 初始化 WiFi
     wifi::init(peripherals.WIFI).await;
-    spawner
-        .spawn(wifi::wifi_scan())
-        .expect("failed to spawn wifi task");
-
+    let result = spawner.spawn(wifi::wifi_scan());
+    if result.is_err() {
+        info!("Failed to initialize WiFi");
+    }
     // 初始化 XL9555 GPIO 扩展芯片
     // 使用 I2C0 接口，SDA 连接 GPIO41，SCL 连接 GPIO42
     i2c::init(peripherals.I2C0, peripherals.GPIO41, peripherals.GPIO42).await;
@@ -157,9 +158,10 @@ async fn main(spawner: Spawner) {
         info!("Failed to initialize XL9555 GPIO expander");
     }
     // 启动按键检测任务
-    spawner
-        .spawn(xl9555::read_keys())
-        .expect("failed to spawn xl9555 task");
+    let result = spawner.spawn(xl9555::read_keys());
+    if result.is_err() {
+        warn!("Failed to spawn xl9555 task");
+    }
 
     // 配置 SPI 接口引脚
     let sck = peripherals.GPIO12; // SPI 时钟线
@@ -190,11 +192,14 @@ async fn main(spawner: Spawner) {
     .with_buffers(dma_rx_buf, dma_tx_buf);
 
     // 初始化 ATK-MD0240 LCD 模块
-    xl9555::init_atk_md0240().await;
-
-    info!("Turning on LCD backlight");
+    let result = xl9555::init_atk_md0240().await;
+    if result.is_err() {
+        warn!("Failed to initialize ATK-MD0240 LCD module");
+    }
     // 开启 LCD 背光
     // 通过 XL9555 的 P1.3 引脚控制 ATK-MD0240 模块的 PWR 引脚
-    xl9555::set_lcd_backlight(true).await;
-    info!("LCD backlight should be on now");
+    let result = xl9555::set_lcd_backlight(true).await;
+    if result.is_err() {
+        warn!("Failed to set LCD backlight");
+    }
 }

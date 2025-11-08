@@ -1,11 +1,11 @@
-use core::cell::RefCell;
-use critical_section::Mutex;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::mutex::Mutex as EmbassyMutex;
 use esp_hal::gpio::interconnect::PeripheralOutput;
 use esp_hal::i2c::master::Config as I2cConfig;
-use esp_hal::i2c::master::{I2c, Instance, Error as I2cError};
+use esp_hal::i2c::master::{Error as I2cError, I2c, Instance};
 use esp_hal::Blocking;
 
-static I2C: Mutex<RefCell<Option<I2c<Blocking>>>> = Mutex::new(RefCell::new(None));
+static I2C: EmbassyMutex<CriticalSectionRawMutex, Option<I2c<Blocking>>> = EmbassyMutex::new(None);
 
 /// 初始化 I2C
 ///
@@ -31,38 +31,18 @@ pub async fn init(
         .with_sda(sda)
         .with_scl(scl);
 
-    critical_section::with(|cs| {
-        I2C.borrow_ref_mut(cs).replace(i2c);
-    });
+    I2C.lock().await.replace(i2c);
 }
 
 /// 通过闭包访问 I2C 实例
 ///
 /// # 参数
 /// * `f` - 闭包函数，接受 I2C 实例作为参数
-pub fn with_i2c<F, R>(f: F) -> Result<R, I2cError>
+pub async fn with_i2c<F, R>(f: F) -> Result<R, I2cError>
 where
     F: FnOnce(&mut I2c<Blocking>) -> Result<R, I2cError>,
 {
-    critical_section::with(|cs| {
-        let mut i2c_ref = I2C.borrow_ref_mut(cs);
-        let mut i2c = i2c_ref.as_mut().unwrap();
-        f(&mut i2c)
-    })
-}
-
-/// 通过闭包访问 I2C 实例（无返回值版本）
-///
-/// # 参数
-/// * `f` - 闭包函数，接受 I2C 实例作为参数
-#[allow(unused)]
-pub fn with_i2c_mut<F>(f: F)
-where
-    F: FnOnce(&mut I2c<Blocking>),
-{
-    critical_section::with(|cs| {
-        let mut i2c_ref = I2C.borrow_ref_mut(cs);
-        let mut i2c = i2c_ref.as_mut().unwrap();
-        f(&mut i2c);
-    })
+    let mut guard = I2C.lock().await;
+    let mut i2c_ref = guard.as_mut().unwrap();
+    f(&mut i2c_ref)
 }

@@ -1,7 +1,7 @@
 use crate::i2c;
 use core::cell::RefCell;
 use critical_section::Mutex;
-use defmt::info;
+use defmt::{error, info};
 use embassy_time::Timer;
 use esp_hal::i2c::master::Error as I2cError;
 use esp_hal::i2c::master::I2c;
@@ -103,7 +103,7 @@ pub mod io_bits {
 /// - P1 端口部分配置为输出模式，用于 LCD 控制信号
 ///
 pub async fn init() -> Result<(), I2cError> {
-    i2c::with_i2c(|i2c| {
+    i2c::with_i2c(|i2c_ref| {
         // 配置XL9555 IO方向 (0表示输出，1表示输入)
         // P0全部配置为输入 (按键等)
         // P1配置为输出，但按键引脚配置为输入
@@ -111,23 +111,22 @@ pub async fn init() -> Result<(), I2cError> {
         // P1.4-P1.7 为输入（按键）
         // 配置 P0 端口为输入模式
         // P0 端口连接按键，需要配置为输入模式以检测按键状态
-        i2c.write(XL9555_ADDR, &[registers::CONFIG_PORT_0, 0xFF])?;
+        i2c_ref.write(XL9555_ADDR, &[registers::CONFIG_PORT_0, 0xFF])?;
         // 配置 P1 端口方向
         // P1 端口混合使用，低 4 位用于 LCD 控制（输出），高 4 位用于按键（输入）
         // 0xF0 表示高 4 位为输入(1)，低 4 位为输出(0)
-        i2c.write(XL9555_ADDR, &[registers::CONFIG_PORT_1, 0xF0])?;
+        i2c_ref.write(XL9555_ADDR, &[registers::CONFIG_PORT_1, 0xF0])?;
 
         // 初始化 P0 端口输出状态
         // 将 P0 端口输出寄存器初始化为 0
-        i2c.write(XL9555_ADDR, &[registers::OUTPUT_PORT_0, 0x00])
+        i2c_ref
+            .write(XL9555_ADDR, &[registers::OUTPUT_PORT_0, 0x00])
             .ok();
         // 初始化 P1 端口输出状态
         // 将 P1 端口输出寄存器初始化为 0
-        i2c.write(XL9555_ADDR, &[registers::OUTPUT_PORT_1, 0x00])
-            .ok();
-
-        Ok(())
+        i2c_ref.write(XL9555_ADDR, &[registers::OUTPUT_PORT_1, 0x00])
     })
+    .await
 }
 
 // 控制 SPI LCD 电源状态
@@ -139,24 +138,19 @@ pub async fn init() -> Result<(), I2cError> {
 /// # 参数
 /// * `i2c` - I2C 接口引用
 /// * `state` - 电源状态，true 表示开启（高电平），false 表示关闭（低电平）
-pub fn set_spi_lcd_power_state(i2c: &mut I2c<Blocking>, state: bool) {
+pub fn set_spi_lcd_power_state(i2c_ref: &mut I2c<Blocking>, state: bool) -> Result<(), I2cError> {
     // 读取当前端口1输出状态
     let mut port1_data = [0u8];
-    if i2c
-        .write_read(XL9555_ADDR, &[registers::OUTPUT_PORT_1], &mut port1_data)
-        .is_ok()
-    {
-        // 根据状态设置 SPI LCD 电源引脚 (P1.3)
-        let new_port1_data = if state {
-            port1_data[0] | (io_bits::SLCD_PWR_IO >> 8) as u8 // 设置P1.3为高电平
-        } else {
-            port1_data[0] & !((io_bits::SLCD_PWR_IO >> 8) as u8) // 设置P1.3为低电平
-        };
+    i2c_ref.write_read(XL9555_ADDR, &[registers::OUTPUT_PORT_1], &mut port1_data)?;
+    // 根据状态设置 SPI LCD 电源引脚 (P1.3)
+    let new_port1_data = if state {
+        port1_data[0] | (io_bits::SLCD_PWR_IO >> 8) as u8 // 设置P1.3为高电平
+    } else {
+        port1_data[0] & !((io_bits::SLCD_PWR_IO >> 8) as u8) // 设置P1.3为低电平
+    };
 
-        // 写回端口1输出
-        i2c.write(XL9555_ADDR, &[registers::OUTPUT_PORT_1, new_port1_data])
-            .ok();
-    }
+    // 写回端口1输出
+    i2c_ref.write(XL9555_ADDR, &[registers::OUTPUT_PORT_1, new_port1_data])
 }
 
 // 控制 SPI LCD 复位状态
@@ -166,31 +160,24 @@ pub fn set_spi_lcd_power_state(i2c: &mut I2c<Blocking>, state: bool) {
 /// # 参数
 /// * `i2c` - I2C 接口引用
 /// * `state` - 复位状态，true 表示复位释放（高电平），false 表示复位（低电平）
-pub fn set_spi_lcd_reset_state(i2c: &mut I2c<Blocking>, state: bool) {
+pub fn set_spi_lcd_reset_state(i2c_ref: &mut I2c<Blocking>, state: bool) -> Result<(), I2cError> {
     // 读取当前端口1输出状态
     let mut port1_data = [0u8];
-    if i2c
-        .write_read(XL9555_ADDR, &[registers::OUTPUT_PORT_1], &mut port1_data)
-        .is_ok()
-    {
-        // 根据状态设置 SPI LCD 复位引脚 (P1.2)
-        let new_port1_data = if state {
-            port1_data[0] | (io_bits::SLCD_RST_IO >> 8) as u8 // 设置P1.2为高电平
-        } else {
-            port1_data[0] & !((io_bits::SLCD_RST_IO >> 8) as u8) // 设置P1.2为低电平
-        };
+    i2c_ref.write_read(XL9555_ADDR, &[registers::OUTPUT_PORT_1], &mut port1_data)?;
+    // 根据状态设置 SPI LCD 复位引脚 (P1.2)
+    let new_port1_data = if state {
+        port1_data[0] | (io_bits::SLCD_RST_IO >> 8) as u8 // 设置P1.2为高电平
+    } else {
+        port1_data[0] & !((io_bits::SLCD_RST_IO >> 8) as u8) // 设置P1.2为低电平
+    };
 
-        // 写回端口1输出
-        i2c.write(XL9555_ADDR, &[registers::OUTPUT_PORT_1, new_port1_data])
-            .ok();
-    }
+    // 写回端口1输出
+    i2c_ref.write(XL9555_ADDR, &[registers::OUTPUT_PORT_1, new_port1_data])
 }
 
 // 添加公共函数用于外部调用
-pub async fn spi_lcd_reset(state: bool) {
-    i2c::with_i2c_mut(|i2c| {
-        set_spi_lcd_reset_state(i2c, state);
-    });
+pub async fn spi_lcd_reset(state: bool) -> Result<(), I2cError> {
+    i2c::with_i2c(|i2c_ref| set_spi_lcd_reset_state(i2c_ref, state)).await
 }
 
 /// 公共接口函数：控制 LCD 背光开关
@@ -200,24 +187,23 @@ pub async fn spi_lcd_reset(state: bool) {
 ///
 /// # 参数
 /// * `state` - 背光状态，true 表示开启背光，false 表示关闭背光
-pub async fn set_lcd_backlight(state: bool) {
-    i2c::with_i2c_mut(|i2c| {
-        set_spi_lcd_power_state(i2c, state);
-    });
+pub async fn set_lcd_backlight(state: bool) -> Result<(), I2cError> {
+    i2c::with_i2c(|i2c_ref| set_spi_lcd_power_state(i2c_ref, state)).await
 }
 
 /// 初始化ATK-MD0240模块
 /// 执行硬件复位序列：RST引脚拉低至少10微秒，然后拉高并延时120毫秒等待复位完成
-pub async fn init_atk_md0240() {
+pub async fn init_atk_md0240() -> Result<(), I2cError> {
     // 拉低RST引脚至少10微秒
-    spi_lcd_reset(false).await;
+    spi_lcd_reset(false).await?;
     Timer::after_micros(10).await;
 
     // 拉高RST引脚
-    spi_lcd_reset(true).await;
+    spi_lcd_reset(true).await?;
 
     // 延时120毫秒等待复位完成
     Timer::after_millis(120).await;
+    Ok(())
 }
 
 /// 按键输入检测任务
@@ -289,7 +275,13 @@ pub async fn read_keys() {
                                 // 切换背光状态
                                 let mut bl_state = BL_STATE.borrow_ref_mut(cs);
                                 *bl_state = !*bl_state;
-                                set_spi_lcd_power_state(i2c_ref, *bl_state);
+                                let result = set_spi_lcd_power_state(i2c_ref, *bl_state);
+                                if result.is_err() {
+                                    error!(
+                                        "Failed to set LCD backlight state: {}",
+                                        result.unwrap_err()
+                                    );
+                                }
                                 info!(
                                     "LCD backlight is now {}",
                                     if *bl_state { "ON" } else { "OFF" }
@@ -308,7 +300,8 @@ pub async fn read_keys() {
 
             Ok(())
         })
-        .unwrap();
+        .await
+        .ok();
 
         Timer::after_millis(50).await;
     }
