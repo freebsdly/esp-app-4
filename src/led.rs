@@ -13,6 +13,7 @@ pub async fn led0_init(led: impl OutputPin + 'static) {
     info!("LED0 init done");
 }
 
+#[allow(unused)]
 pub async fn led0_toggle() {
     if let Some(led0) = LED0.lock().await.as_mut() {
         led0.toggle();

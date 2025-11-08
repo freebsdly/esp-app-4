@@ -1,10 +1,10 @@
+use crate::i2c;
 use core::cell::RefCell;
 use critical_section::Mutex;
 use defmt::info;
 use embassy_time::Timer;
-use esp_hal::gpio::interconnect::PeripheralOutput;
-use esp_hal::i2c::master::Config as I2cConfig;
-use esp_hal::i2c::master::{I2c, Instance};
+use esp_hal::i2c::master::Error as I2cError;
+use esp_hal::i2c::master::I2c;
 use esp_hal::Blocking;
 
 /// XL9555 I2C GPIO 扩展芯片驱动
@@ -26,7 +26,6 @@ use esp_hal::Blocking;
 /// 4. 启动 [read_keys] 任务检测按键输入
 pub const XL9555_ADDR: u8 = 0x20; // 7-bit I2C 地址
 
-static I2C: Mutex<RefCell<Option<I2c<Blocking>>>> = Mutex::new(RefCell::new(None));
 // 在全局静态变量中添加按键状态跟踪
 // [KEY0, KEY1, KEY2, KEY3]
 static KEY_STATES: Mutex<RefCell<[bool; 4]>> = Mutex::new(RefCell::new([false; 4]));
@@ -105,22 +104,8 @@ pub mod io_bits {
 ///
 /// # 参数
 /// * `i2c` - I2C 实例
-/// * `sda` - SDA 引脚
-/// * `scl` - SCL 引脚
 ///
-/// # Panics
-///
-/// 当 I2C 初始化失败时会 panic
-pub async fn init(
-    i2c: impl Instance + 'static,
-    sda: impl PeripheralOutput<'static>,
-    scl: impl PeripheralOutput<'static>,
-) {
-    let mut i2c = I2c::new(i2c, I2cConfig::default())
-        .expect("Failed to initialize I2C")
-        .with_sda(sda)
-        .with_scl(scl);
-
+pub fn init(i2c: &mut I2c<Blocking>) -> Result<(), I2cError> {
     // 配置XL9555 IO方向 (0表示输出，1表示输入)
     // P0全部配置为输入 (按键等)
     // P1配置为输出，但按键引脚配置为输入
@@ -128,13 +113,11 @@ pub async fn init(
     // P1.4-P1.7 为输入（按键）
     // 配置 P0 端口为输入模式
     // P0 端口连接按键，需要配置为输入模式以检测按键状态
-    i2c.write(XL9555_ADDR, &[registers::CONFIG_PORT_0, 0xFF])
-        .expect("Failed to configure XL9555 PORT0");
+    i2c.write(XL9555_ADDR, &[registers::CONFIG_PORT_0, 0xFF])?;
     // 配置 P1 端口方向
     // P1 端口混合使用，低 4 位用于 LCD 控制（输出），高 4 位用于按键（输入）
     // 0xF0 表示高 4 位为输入(1)，低 4 位为输出(0)
-    i2c.write(XL9555_ADDR, &[registers::CONFIG_PORT_1, 0xF0])
-        .expect("Failed to configure XL9555 PORT1");
+    i2c.write(XL9555_ADDR, &[registers::CONFIG_PORT_1, 0xF0])?;
 
     // 初始化 P0 端口输出状态
     // 将 P0 端口输出寄存器初始化为 0
@@ -145,9 +128,7 @@ pub async fn init(
     i2c.write(XL9555_ADDR, &[registers::OUTPUT_PORT_1, 0x00])
         .ok();
 
-    critical_section::with(|cs| {
-        I2C.borrow_ref_mut(cs).replace(i2c);
-    });
+    Ok(())
 }
 
 // 控制 SPI LCD 电源状态
@@ -208,11 +189,11 @@ pub fn set_spi_lcd_reset_state(i2c: &mut I2c<Blocking>, state: bool) {
 
 // 添加公共函数用于外部调用
 pub fn spi_lcd_reset(state: bool) {
-    critical_section::with(|cs| {
-        let mut i2c = I2C.borrow_ref_mut(cs);
-        let i2c_ref = i2c.as_mut().unwrap();
-        set_spi_lcd_reset_state(i2c_ref, state);
-    });
+    i2c::with_i2c(|i2c| {
+        set_spi_lcd_reset_state(i2c, state);
+        Ok(())
+    })
+    .unwrap();
 }
 
 /// 公共接口函数：控制 LCD 背光开关
@@ -223,11 +204,11 @@ pub fn spi_lcd_reset(state: bool) {
 /// # 参数
 /// * `state` - 背光状态，true 表示开启背光，false 表示关闭背光
 pub fn set_lcd_backlight(state: bool) {
-    critical_section::with(|cs| {
-        let mut i2c = I2C.borrow_ref_mut(cs);
-        let i2c_ref = i2c.as_mut().unwrap();
-        set_spi_lcd_power_state(i2c_ref, state);
-    });
+    i2c::with_i2c(|i2c| {
+        set_spi_lcd_power_state(i2c, state);
+        Ok(())
+    })
+    .unwrap();
 }
 
 /// 初始化ATK-MD0240模块
@@ -272,10 +253,7 @@ pub async fn init_atk_md0240() {
 #[embassy_executor::task]
 pub async fn read_keys() {
     loop {
-        critical_section::with(|cs| {
-            let mut i2c = I2C.borrow_ref_mut(cs);
-            let i2c_ref = i2c.as_mut().unwrap();
-
+        i2c::with_i2c(|i2c_ref| {
             // 读取 P0 端口输入状态
             // 通过读取输入端口寄存器获取 P0 端口当前的电平状态
             let mut port0_data = [0u8];
@@ -304,33 +282,38 @@ pub async fn read_keys() {
             ];
 
             // 检查按键状态变化
-            let mut key_states = KEY_STATES.borrow_ref_mut(cs);
-            for i in 0..4 {
-                if current_states[i] && !key_states[i] {
-                    // 按键刚被按下
-                    match i {
-                        0 => info!("KEY0 pressed"),
-                        1 => {
-                            info!("KEY1 pressed - toggling LCD backlight");
-                            // 切换背光状态
-                            let mut bl_state = BL_STATE.borrow_ref_mut(cs);
-                            *bl_state = !*bl_state;
-                            set_spi_lcd_power_state(i2c_ref, *bl_state);
-                            info!(
-                                "LCD backlight is now {}",
-                                if *bl_state { "ON" } else { "OFF" }
-                            );
+            critical_section::with(|cs| {
+                let mut key_states = KEY_STATES.borrow_ref_mut(cs);
+                for i in 0..4 {
+                    if current_states[i] && !key_states[i] {
+                        // 按键刚被按下
+                        match i {
+                            0 => info!("KEY0 pressed"),
+                            1 => {
+                                info!("KEY1 pressed - toggling LCD backlight");
+                                // 切换背光状态
+                                let mut bl_state = BL_STATE.borrow_ref_mut(cs);
+                                *bl_state = !*bl_state;
+                                set_spi_lcd_power_state(i2c_ref, *bl_state);
+                                info!(
+                                    "LCD backlight is now {}",
+                                    if *bl_state { "ON" } else { "OFF" }
+                                );
+                            }
+                            2 => info!("KEY2 pressed"),
+                            3 => info!("KEY3 pressed"),
+                            _ => {}
                         }
-                        2 => info!("KEY2 pressed"),
-                        3 => info!("KEY3 pressed"),
-                        _ => {}
                     }
                 }
-            }
 
-            // 更新按键状态
-            *key_states = current_states;
-        });
+                // 更新按键状态
+                *key_states = current_states;
+            });
+
+            Ok(())
+        })
+        .unwrap();
 
         Timer::after_millis(50).await;
     }

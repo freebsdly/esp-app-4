@@ -105,6 +105,7 @@ use esp_hal::timer::timg::TimerGroup;
 use {esp_backtrace, esp_println};
 
 mod button;
+mod i2c;
 mod lcd;
 mod led;
 mod wifi;
@@ -124,7 +125,7 @@ async fn main(spawner: Spawner) {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
-    esp_alloc :: heap_allocator ! ( size : 64 * 1024 );
+    esp_alloc::heap_allocator!( size : 64 * 1024 );
 
     let time_g0_timer = peripherals.TIMG0;
     let time_g0 = TimerGroup::new(time_g0_timer);
@@ -146,7 +147,8 @@ async fn main(spawner: Spawner) {
 
     // 初始化 XL9555 GPIO 扩展芯片
     // 使用 I2C0 接口，SDA 连接 GPIO41，SCL 连接 GPIO42
-    xl9555::init(peripherals.I2C0, peripherals.GPIO41, peripherals.GPIO42).await;
+    i2c::init(peripherals.I2C0, peripherals.GPIO41, peripherals.GPIO42).await;
+    i2c::with_i2c(|i2c| xl9555::init(i2c)).unwrap();
     // 启动按键检测任务
     spawner
         .spawn(xl9555::read_keys())
@@ -169,8 +171,7 @@ async fn main(spawner: Spawner) {
     .expect("failed to initialize SPI")
     .with_sck(sck)
     .with_mosi(mos)
-    .with_miso(mis)
-    .with_cs(cs);
+    .with_miso(mis);
 
     // 初始化 ATK-MD0240 LCD 模块
     xl9555::init_atk_md0240().await;
