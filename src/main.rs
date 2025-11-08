@@ -200,8 +200,8 @@ async fn main(spawner: Spawner) {
             spi_ref,
             dc,
             Option::<esp_hal::gpio::AnyPin>::None, // 使用软件复位
-            240,                                   // 宽度
-            135,                                   // 高度
+            320,                                   // 宽度
+            240,                                   // 高度
         );
 
         // 初始化显示屏

@@ -52,7 +52,7 @@ pub async fn init(
     let spi = Spi::new(
         spi2,
         Config::default()
-            .with_frequency(Rate::from_mhz(10))
+            .with_frequency(Rate::from_mhz(60))
             .with_mode(Mode::_0),
     )?
     .with_sck(sck)

@@ -85,7 +85,7 @@ impl<'d> ST7789<'d> {
         // Hardware reset if pin provided
         if let Some(rst) = &mut self.rst {
             rst.set_low();
-            self.delay.delay_millis(10);
+            self.delay.delay_micros(10);
             rst.set_high();
             self.delay.delay_millis(120);
         } else {
@@ -99,10 +99,11 @@ impl<'d> ST7789<'d> {
         self.delay.delay_millis(120);
 
         // Set color mode to 16-bit RGB565
-        self.write_command(CMD_COLMOD, &[0x55])?;
+        self.write_command(CMD_COLMOD, &[0x66])?;
         self.delay.delay_millis(10);
 
         // Configure display orientation and RGB mode
+        // MX=0, MY=0, MV=0: Scan from left to right, top to bottom
         self.write_command(CMD_MADCTL, &[MADCTL_RGB])?;
 
         // Set frame rate
@@ -180,7 +181,9 @@ impl<'d> ST7789<'d> {
         
         self.dc.set_high(); // Data mode
         let color = RawU16::from(color).into_inner().to_be_bytes();
-        self.spi.write(&color)?;
+        // According to specification, we need to swap bytes for RGB565 format
+        let color_data = [color[1], color[0]];
+        self.spi.write(&color_data)?;
         
         Ok(())
     }
@@ -216,8 +219,11 @@ impl<'d> ST7789<'d> {
         self.dc.set_high(); // Data mode
         
         let color = RawU16::from(color).into_inner().to_be_bytes();
-        for _ in 0..(w as usize * h as usize) {
-            self.spi.write(&color)?;
+        let count = w as usize * h as usize;
+        // According to specification, we need to swap bytes for RGB565 format
+        let color_data = [color[1], color[0]];
+        for _ in 0..count {
+            self.spi.write(&color_data)?;
         }
         
         Ok(())
