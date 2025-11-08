@@ -195,13 +195,14 @@ async fn main(spawner: Spawner) {
         let mut guard = spi::SPI.lock().await;
         let spi_ref = guard.take().unwrap();
 
-        // 创建ST7789驱动实例 (240x135 是ST7789常见的分辨率)
+        // 创建ST7789驱动实例 (240x320 是ST7789V常见的分辨率)
+        // 使用GPIO14作为RST引脚，确保硬件复位
         let mut display = st7789::ST7789::new(
             spi_ref,
             dc,
-            Option::<esp_hal::gpio::AnyPin>::None, // 使用软件复位
-            240,                                   // 宽度
-            320,                                   // 高度
+            Some(peripherals.GPIO14), // 使用硬件复位
+            240,                      // 宽度
+            320,                      // 高度
         );
 
         // 初始化显示屏
@@ -213,35 +214,35 @@ async fn main(spawner: Spawner) {
             );
         } else {
             info!("ST7789 display initialized successfully");
-
-            // 填充屏幕为红色
-            let fill_result = display.fill_screen(Rgb565::RED);
-            if fill_result.is_err() {
-                warn!("Failed to fill screen with red color");
-            } else {
-                info!("Screen filled with red color");
+            
+            // 设置显示方向为纵向
+            let orient_result = display.set_orientation(st7789::Orientation::Portrait);
+            if orient_result.is_err() {
+                warn!("Failed to set display orientation");
             }
 
-            // 等待一段时间
-            embassy_time::Timer::after_millis(1000).await;
-
-            // 填充屏幕为绿色
-            let fill_result = display.fill_screen(Rgb565::GREEN);
-            if fill_result.is_err() {
-                warn!("Failed to fill screen with green color");
-            } else {
-                info!("Screen filled with green color");
-            }
-
-            // 等待一段时间
-            embassy_time::Timer::after_millis(1000).await;
-
-            // 填充屏幕为蓝色
-            let fill_result = display.fill_screen(Rgb565::BLUE);
-            if fill_result.is_err() {
-                warn!("Failed to fill screen with blue color");
-            } else {
-                info!("Screen filled with blue color");
+            // 使用循环持续检查颜色状态并更新屏幕显示
+            loop {
+                {
+                    let current_color = button::CURRENT_COLOR.lock().await;
+                    let color = match *current_color {
+                        button::DisplayColor::Red => Rgb565::RED,
+                        button::DisplayColor::Green => Rgb565::GREEN,
+                        button::DisplayColor::Blue => Rgb565::BLUE,
+                        button::DisplayColor::White => Rgb565::WHITE,
+                        button::DisplayColor::Black => Rgb565::BLACK,
+                    };
+                    drop(current_color); // 释放锁
+                    
+                    // 填充屏幕为当前颜色
+                    let fill_result = display.fill_screen(color);
+                    if fill_result.is_err() {
+                        warn!("Failed to fill screen with color");
+                    }
+                }
+                
+                // 等待一段时间再检查颜色状态
+                embassy_time::Timer::after_millis(100).await;
             }
         }
     }

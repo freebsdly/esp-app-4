@@ -5,6 +5,43 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex as EmbassyMutex;
 use embassy_time::Timer;
 use esp_hal::gpio::{Event, Input, InputConfig, InputPin};
+use esp_hal::i2c::master::Error as I2cError;
+use esp_hal::i2c::master::I2c;
+use esp_hal::Blocking;
+
+// 添加颜色枚举
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DisplayColor {
+    Red,
+    Green,
+    Blue,
+    White,
+    Black,
+}
+
+impl defmt::Format for DisplayColor {
+    fn format(&self, f: defmt::Formatter) {
+        match self {
+            DisplayColor::Red => defmt::write!(f, "Red"),
+            DisplayColor::Green => defmt::write!(f, "Green"),
+            DisplayColor::Blue => defmt::write!(f, "Blue"),
+            DisplayColor::White => defmt::write!(f, "White"),
+            DisplayColor::Black => defmt::write!(f, "Black"),
+        }
+    }
+}
+
+impl DisplayColor {
+    pub fn next(&self) -> DisplayColor {
+        match self {
+            DisplayColor::Red => DisplayColor::Green,
+            DisplayColor::Green => DisplayColor::Blue,
+            DisplayColor::Blue => DisplayColor::White,
+            DisplayColor::White => DisplayColor::Black,
+            DisplayColor::Black => DisplayColor::Red,
+        }
+    }
+}
 
 pub static BOOT_BUTTON_ASYNC: EmbassyMutex<CriticalSectionRawMutex, Option<Input<'static>>> =
     EmbassyMutex::new(None);
@@ -14,12 +51,45 @@ pub static BOOT_BUTTON_ASYNC: EmbassyMutex<CriticalSectionRawMutex, Option<Input
 static KEY_STATES: EmbassyMutex<CriticalSectionRawMutex, [bool; 4]> = EmbassyMutex::new([false; 4]);
 // 添加背光状态跟踪
 static BL_STATE: EmbassyMutex<CriticalSectionRawMutex, bool> = EmbassyMutex::new(true);
+// 添加屏幕颜色状态跟踪
+pub static CURRENT_COLOR: EmbassyMutex<CriticalSectionRawMutex, DisplayColor> =
+    EmbassyMutex::new(DisplayColor::Red);
 
 pub async fn boot_button_init(button: impl InputPin + 'static) {
     let mut boot_button = Input::new(button, InputConfig::default());
     boot_button.listen(Event::FallingEdge);
     BOOT_BUTTON_ASYNC.lock().await.replace(boot_button);
     info!("Boot button initialized")
+}
+
+/// 切换LCD背光状态
+///
+/// 该函数负责切换LCD背光的开/关状态，并更新相关的状态跟踪变量
+///
+/// # 参数
+/// * `i2c_ref` - I2C接口引用，用于与XL9555芯片通信
+///
+/// # 返回值
+/// * `Result<(), esp_hal::i2c::Error>` - 操作结果，成功或错误信息
+fn toggle_lcd_backlight(i2c_ref: &mut I2c<Blocking>) -> Result<(), I2cError> {
+    // 获取当前背光状态并切换
+    let mut bl_state = BL_STATE.try_lock().unwrap();
+    let new_bl_state = !*bl_state;
+    *bl_state = new_bl_state;
+    drop(bl_state); // 释放锁，以便在下面的调用中不会死锁
+
+    // 设置新的背光状态
+    let result = set_spi_lcd_power_state(i2c_ref, new_bl_state);
+    if result.is_err() {
+        return Err(result.unwrap_err());
+    }
+
+    info!(
+        "LCD backlight is now {}",
+        if new_bl_state { "ON" } else { "OFF" }
+    );
+
+    Ok(())
 }
 
 /// 按键输入检测任务
@@ -31,7 +101,7 @@ pub async fn boot_button_init(button: impl InputPin + 'static) {
 /// 按键功能分配：
 /// - KEY0: 未分配特定功能
 /// - KEY1: 切换 LCD 背光状态
-/// - KEY2: 未分配特定功能
+/// - KEY2: 切换屏幕颜色 (红->绿->蓝->白->黑->红...)
 /// - KEY3: 未分配特定功能
 ///
 /// 读取按键输入
@@ -79,25 +149,24 @@ pub async fn read_keys() {
                             info!("KEY1 pressed - toggling LCD backlight");
                             // 切换背光状态
                             drop(key_states); // 释放锁，以便获取背光状态锁
-                            let mut bl_state = BL_STATE.try_lock().unwrap();
-                            let new_bl_state = !*bl_state;
-                            *bl_state = new_bl_state;
-                            drop(bl_state); // 释放锁，以便在下面的调用中不会死锁
-
-                            let result = set_spi_lcd_power_state(i2c_ref, new_bl_state);
+                            let result = toggle_lcd_backlight(i2c_ref);
                             if result.is_err() {
                                 error!(
                                     "Failed to set LCD backlight state: {}",
                                     result.unwrap_err()
                                 );
                             }
-                            info!(
-                                "LCD backlight is now {}",
-                                if new_bl_state { "ON" } else { "OFF" }
-                            );
                             key_states = KEY_STATES.try_lock().unwrap(); // 重新获取锁
                         }
-                        2 => info!("KEY2 pressed"),
+                        2 => {
+                            info!("KEY2 pressed - switching display color");
+                            // 切换屏幕颜色
+                            drop(key_states); // 释放锁，以便获取颜色状态锁
+                            let mut current_color = CURRENT_COLOR.try_lock().unwrap();
+                            *current_color = current_color.next();
+                            info!("Display color switched to {:?}", *current_color);
+                            key_states = KEY_STATES.try_lock().unwrap(); // 重新获取锁
+                        }
                         3 => info!("KEY3 pressed"),
                         _ => {}
                     }

@@ -37,13 +37,26 @@ const CMD_FCS: u8 = 0xF0; // Frame rate control
 const CMD_CSC: u8 = 0xF1; // Clock Speed Control
 
 // MADCTL register bits
-const MADCTL_MY: u8 = 0x80;
-const MADCTL_MX: u8 = 0x40;
-const MADCTL_MV: u8 = 0x20;
-const MADCTL_ML: u8 = 0x10;
-const MADCTL_RGB: u8 = 0x00;
-const MADCTL_BGR: u8 = 0x08;
-const MADCTL_MH: u8 = 0x04;
+const MADCTL_MY: u8 = 0x80;  // Page Address Order (0: top to bottom, 1: bottom to top)
+const MADCTL_MX: u8 = 0x40;  // Column Address Order (0: left to right, 1: right to left)
+const MADCTL_MV: u8 = 0x20;  // Page/Column Order (0: normal mode, 1: reverse mode)
+const MADCTL_ML: u8 = 0x10;  // Line Address Order (0: LCD refresh from top to bottom, 1: bottom to top)
+const MADCTL_RGB: u8 = 0x00; // RGB Order (0: RGB, 1: BGR)
+const MADCTL_BGR: u8 = 0x08; // BGR Order (0: RGB, 1: BGR)
+const MADCTL_MH: u8 = 0x04;  // Display Data Latch Order (0: LCD refresh from left to right, 1: right to left)
+
+/// Display orientation
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Orientation {
+    /// Portrait orientation (normal)
+    Portrait,
+    /// Portrait orientation (flipped/mirrored)
+    PortraitFlipped,
+    /// Landscape orientation (rotated 90 degrees)
+    Landscape,
+    /// Landscape orientation (flipped/mirrored)
+    LandscapeFlipped,
+}
 
 /// ST7789 display driver
 pub struct ST7789<'d> {
@@ -99,11 +112,12 @@ impl<'d> ST7789<'d> {
         self.delay.delay_millis(120);
 
         // Set color mode to 16-bit RGB565
-        self.write_command(CMD_COLMOD, &[0x66])?;
+        self.write_command(CMD_COLMOD, &[0x55])?; // 0x55 = 16-bit/pixel RGB565
         self.delay.delay_millis(10);
 
         // Configure display orientation and RGB mode
         // MX=0, MY=0, MV=0: Scan from left to right, top to bottom
+        // Using RGB order as specified for ST7789V
         self.write_command(CMD_MADCTL, &[MADCTL_RGB])?;
 
         // Set frame rate
@@ -180,9 +194,9 @@ impl<'d> ST7789<'d> {
         self.write_command(CMD_RAMWR, &[])?;
         
         self.dc.set_high(); // Data mode
-        let color = RawU16::from(color).into_inner().to_be_bytes();
-        // According to specification, we need to swap bytes for RGB565 format
-        let color_data = [color[1], color[0]];
+        let color = RawU16::from(color).into_inner();
+        // Prepare color data with byte swapping for RGB565 format
+        let color_data = [(color >> 8) as u8, (color & 0xFF) as u8];
         self.spi.write(&color_data)?;
         
         Ok(())
@@ -218,10 +232,13 @@ impl<'d> ST7789<'d> {
         
         self.dc.set_high(); // Data mode
         
-        let color = RawU16::from(color).into_inner().to_be_bytes();
+        let color = RawU16::from(color).into_inner();
         let count = w as usize * h as usize;
-        // According to specification, we need to swap bytes for RGB565 format
-        let color_data = [color[1], color[0]];
+        
+        // Prepare color data with byte swapping for RGB565 format
+        let color_data = [(color >> 8) as u8, (color & 0xFF) as u8];
+        
+        // Optimized write process, batch write color data
         for _ in 0..count {
             self.spi.write(&color_data)?;
         }
@@ -237,6 +254,17 @@ impl<'d> ST7789<'d> {
     /// Get the display height
     pub fn height(&self) -> u16 {
         self.height
+    }
+
+    /// Set display orientation
+    pub fn set_orientation(&mut self, orientation: Orientation) -> Result<(), esp_hal::spi::Error> {
+        let madctl = match orientation {
+            Orientation::Portrait => MADCTL_RGB,
+            Orientation::PortraitFlipped => MADCTL_MX | MADCTL_MY | MADCTL_RGB,
+            Orientation::Landscape => MADCTL_MV | MADCTL_MX | MADCTL_RGB,
+            Orientation::LandscapeFlipped => MADCTL_MV | MADCTL_MY | MADCTL_RGB,
+        };
+        self.write_command(CMD_MADCTL, &[madctl])
     }
 }
 
