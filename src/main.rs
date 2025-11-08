@@ -97,14 +97,7 @@ extern crate alloc;
 use defmt::{info, warn};
 use embassy_executor::Spawner;
 use esp_hal::clock::CpuClock;
-use esp_hal::spi::master::{Config, Spi};
-use esp_hal::spi::Mode;
-use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
-use esp_hal::{
-    dma::{DmaRxBuf, DmaTxBuf},
-    dma_buffers,
-};
 // 保留以引入panic handler
 #[allow(unused)]
 use {esp_backtrace, esp_println};
@@ -113,12 +106,17 @@ mod button;
 mod i2c;
 mod lcd;
 mod led;
+mod spi;
+mod st7789;
 mod wifi;
 mod xl9555;
 
 // 创建 esp-idf bootloader 所需的默认应用程序描述符
 // 更多信息请参见: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
+
+use embedded_graphics::pixelcolor::Rgb565;
+use embedded_graphics::prelude::RgbColor;
 
 #[esp_rtos::main]
 /// 主函数
@@ -183,29 +181,68 @@ async fn main(spawner: Spawner) {
 
     // 配置 SPI 接口引脚
     let sck = peripherals.GPIO12; // SPI 时钟线
-    let mos = peripherals.GPIO11; // SPI 主输出从输入线
-    let mis = peripherals.GPIO13; // SPI 主输入从输出线
+    let mosi = peripherals.GPIO11; // SPI 主输出从输入线
+    let miso = peripherals.GPIO13; // SPI 主输入从输出线
     let cs = peripherals.GPIO21; // SPI 片选线
     let dc = peripherals.GPIO40; // LCD 数据/命令选择线
 
-    let dma_channel = peripherals.DMA_CH0;
-    let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(32000);
+    let result = spi::init(peripherals.SPI2, sck, mosi, miso).await;
 
-    let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
+    if result.is_err() {
+        warn!("Failed to initialize SPI interface");
+    } else {
+        // 初始化并使用ST7789显示屏
+        let mut guard = spi::SPI.lock().await;
+        let spi_ref = guard.take().unwrap();
 
-    let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
+        // 创建ST7789驱动实例 (240x135 是ST7789常见的分辨率)
+        let mut display = st7789::ST7789::new(
+            spi_ref,
+            dc,
+            Option::<esp_hal::gpio::AnyPin>::None, // 使用软件复位
+            240,                                   // 宽度
+            135,                                   // 高度
+        );
 
-    // 初始化 SPI 接口
-    let mut spi = Spi::new(
-        peripherals.SPI2,
-        Config::default()
-            .with_frequency(Rate::from_mhz(10))
-            .with_mode(Mode::_0),
-    )
-    .expect("failed to initialize SPI")
-    .with_sck(sck)
-    .with_mosi(mos)
-    .with_miso(mis)
-    .with_dma(dma_channel)
-    .with_buffers(dma_rx_buf, dma_tx_buf);
+        // 初始化显示屏
+        let init_result = display.init();
+        if init_result.is_err() {
+            warn!(
+                "Failed to initialize ST7789 display: {:?}",
+                init_result.err()
+            );
+        } else {
+            info!("ST7789 display initialized successfully");
+
+            // 填充屏幕为红色
+            let fill_result = display.fill_screen(Rgb565::RED);
+            if fill_result.is_err() {
+                warn!("Failed to fill screen with red color");
+            } else {
+                info!("Screen filled with red color");
+            }
+
+            // 等待一段时间
+            embassy_time::Timer::after_millis(1000).await;
+
+            // 填充屏幕为绿色
+            let fill_result = display.fill_screen(Rgb565::GREEN);
+            if fill_result.is_err() {
+                warn!("Failed to fill screen with green color");
+            } else {
+                info!("Screen filled with green color");
+            }
+
+            // 等待一段时间
+            embassy_time::Timer::after_millis(1000).await;
+
+            // 填充屏幕为蓝色
+            let fill_result = display.fill_screen(Rgb565::BLUE);
+            if fill_result.is_err() {
+                warn!("Failed to fill screen with blue color");
+            } else {
+                info!("Screen filled with blue color");
+            }
+        }
+    }
 }
