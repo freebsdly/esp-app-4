@@ -100,6 +100,10 @@ use esp_hal::spi::master::{Config, Spi};
 use esp_hal::spi::Mode;
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
+use esp_hal::{
+    dma::{DmaRxBuf, DmaTxBuf},
+    dma_buffers,
+};
 // 保留以引入panic handler
 #[allow(unused)]
 use {esp_backtrace, esp_println};
@@ -164,6 +168,13 @@ async fn main(spawner: Spawner) {
     let cs = peripherals.GPIO21; // SPI 片选线
     let dc = peripherals.GPIO40; // LCD 数据/命令选择线
 
+    let dma_channel = peripherals.DMA_CH0;
+    let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(32000);
+
+    let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
+
+    let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
+
     // 初始化 SPI 接口
     let mut spi = Spi::new(
         peripherals.SPI2,
@@ -174,7 +185,9 @@ async fn main(spawner: Spawner) {
     .expect("failed to initialize SPI")
     .with_sck(sck)
     .with_mosi(mos)
-    .with_miso(mis);
+    .with_miso(mis)
+    .with_dma(dma_channel)
+    .with_buffers(dma_rx_buf, dma_tx_buf);
 
     // 初始化 ATK-MD0240 LCD 模块
     xl9555::init_atk_md0240().await;
