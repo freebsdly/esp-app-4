@@ -9,7 +9,8 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex as EmbassyMutex;
 use embassy_time::Timer;
 use esp_hal::gpio::Level;
-use esp_hal::gpio::{Flex, InputPin, OutputConfig, OutputPin, Pull};
+use esp_hal::gpio::{Flex, InputConfig, InputPin, OutputConfig, OutputPin, Pull};
+use esp_hal::delay::Delay;
 
 /// DHT11传感器读取错误类型
 #[derive(Debug)]
@@ -98,32 +99,34 @@ pub async fn read_dht11() -> Result<Dht11Data, Dht11Error> {
     let mut guard = DHT11_PIN.lock().await;
     let flex_pin = guard.as_mut().unwrap();
 
-    // 配置为输出模式并发送启动信号
+    // 创建硬件级延时实例
+    let mut delay = Delay::new();
+
+    // 初始化总线（高电平稳定）
     flex_pin.set_high();
     flex_pin.apply_output_config(
         &OutputConfig::default()
             .with_pull(Pull::Up)
-            .with_drive_strength(esp_hal::gpio::DriveStrength::_40mA),
+            .with_drive_strength(esp_hal::gpio::DriveStrength::_20mA),
     );
     flex_pin.set_output_enable(true);
+    delay.delay_micros(10000); // 10ms 高电平，稳定总线
+
     // 步骤 1：主机发起请求
     // 主机将数据线拉低 20ms
     flex_pin.set_low();
-    Timer::after_micros(20000).await; // 20ms
+    delay.delay_micros(20000); // 20ms
 
-    // 然后释放（上拉）总线
+    // 然后释放（上拉）总线并切换为输入模式
     flex_pin.set_high();
-    // 等待DHT11响应，根据时序图需要等待约13μs
-    Timer::after_micros(15).await; // 15us
-
-    // 配置为输入模式以读取传感器响应
     flex_pin.set_input_enable(true);
+    flex_pin.apply_input_config(&InputConfig::default().with_pull(Pull::None)); // 高阻输入
+    delay.delay_micros(40); // 等待传感器响应
 
     // 步骤 2：DHT11 响应
-    // DHT11 检测到低电平后，在 13μs 内拉高总线（表示"我已准备好"）
-    // 等待传感器拉低信号，表示"现在开始发送数据"
-    wait_for_level_with_retry(flex_pin, Level::Low, 100)?;
-    wait_for_level_with_retry(flex_pin, Level::High, 100)?;
+    // 等待传感器响应（80us 低电平，80us 高电平）
+    wait_for_level(&mut *flex_pin, Level::Low, 200, &mut delay)?;
+    wait_for_level(&mut *flex_pin, Level::High, 200, &mut delay)?;
 
     // 步骤 3：数据传输（共 40 位）
     // DHT11 发送 40 位数据，格式如下：
@@ -131,11 +134,11 @@ pub async fn read_dht11() -> Result<Dht11Data, Dht11Error> {
     // 每个字节 8 位，共 5 字节
     let mut data = [0u8; 5];
     for byte in &mut data {
-        *byte = read_byte(flex_pin)?;
+        *byte = read_byte(flex_pin, &mut delay)?;
     }
 
     // 等待结束
-    wait_for_level_with_retry(flex_pin, Level::Low, 100)?;
+    wait_for_level(flex_pin, Level::Low, 100, &mut delay)?;
 
     // 校验数据
     // 校验和 = 湿度高位 + 湿度低位 + 温度高位 + 温度低位
@@ -146,6 +149,10 @@ pub async fn read_dht11() -> Result<Dht11Data, Dht11Error> {
     if checksum != data[4] {
         return Err(Dht11Error::ChecksumMismatch);
     }
+
+    // 恢复总线为高电平
+    flex_pin.set_output_enable(true);
+    flex_pin.set_high();
 
     // 返回解析后的数据
     Ok(Dht11Data {
@@ -180,67 +187,45 @@ impl DHT11 {
 /// # 返回值
 /// * `Ok(u8)` - 成功读取的字节
 /// * `Err(Dht11Error)` - 读取过程中发生的错误
-fn read_byte(pin: &mut Flex<'_>) -> Result<u8, Dht11Error> {
+fn read_byte(pin: &mut Flex<'_>, delay: &mut Delay) -> Result<u8, Dht11Error> {
     let mut data = 0u8;
 
     for i in 0..8 {
-        // 等待变为低电平（起始信号）
-        wait_for_level_with_retry(pin, Level::Low, 100)?;
-
-        // 等待变高电平
-        wait_for_level_with_retry(pin, Level::High, 100)?;
-
-        // 等待大约40us后检测电平状态判断是0还是1
-        // 根据DHT11规格：
-        // 逻辑0：高电平持续约26-28μs，总周期约84μs
-        // 逻辑1：高电平持续约70-72μs，总周期约130μs
-        embassy_time::block_for(embassy_time::Duration::from_micros(40));
-
-        // 根据引脚状态设置位值
-        // 如果仍然是高电平，则为1；如果变为低电平，则为0
-        if pin.is_high() {
-            data |= 1 << (7 - i);
+        // 1. 等待数据位的低电平（固定50us）
+        wait_for_level(pin, Level::Low, 100, delay)?;
+        
+        // 2. 等待高电平开始（传感器拉低结束）
+        wait_for_level(pin, Level::High, 100, delay)?;
+        
+        // 3. 延时45us（临界点：28us < 45us < 70us）
+        delay.delay_micros(45);
+        
+        // 4. 读取当前电平：高1，低0
+        if pin.level() == Level::High {
+            data |= 1 << (7 - i); // 高位在前
         }
+        
+        // 5. 等待当前数据位的高电平结束（避免影响下一位）
+        wait_for_level(pin, Level::Low, 100, delay)?;
     }
 
     Ok(data)
 }
 
-/// 等待指定电平状态（带重试机制）
-///
-/// # 参数
-/// * `pin` - GPIO引脚
-/// * `level` - 期望的电平状态
-/// * `max_retries` - 最大重试次数（每次等待1微秒）
-///
-/// # 返回值
-/// * `Ok(())` - 成功等到指定电平
-/// * `Err(Dht11Error::Timeout)` - 等待超时
-fn wait_for_level_with_retry(
+/// 等待引脚达到目标电平，超时返回错误（单位：微秒）
+fn wait_for_level(
     pin: &mut Flex<'_>,
-    level: Level,
-    max_retries: u32,
+    target_level: Level,
+    timeout_us: u32,
+    delay: &mut Delay,
 ) -> Result<(), Dht11Error> {
-    let mut retries = 0;
-    if level == Level::Low {
-        while pin.is_high() && retries < max_retries {
-            retries += 1;
-            // 每次等待1微秒
-            embassy_time::block_for(embassy_time::Duration::from_micros(1));
+    for _ in 0..timeout_us {
+        if pin.level() == target_level {
+            return Ok(());
         }
-    } else {
-        while pin.is_low() && retries < max_retries {
-            retries += 1;
-            // 每次等待1微秒
-            embassy_time::block_for(embassy_time::Duration::from_micros(1));
-        }
+        delay.delay_micros(1);
     }
-
-    if retries >= max_retries {
-        Err(Dht11Error::Timeout)
-    } else {
-        Ok(())
-    }
+    Err(Dht11Error::Timeout)
 }
 
 /// DHT11传感器任务，定期读取并打印温湿度数据
