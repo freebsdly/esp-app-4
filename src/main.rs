@@ -194,7 +194,7 @@ async fn main(spawner: Spawner) {
         let cs = peripherals.GPIO21; // SPI 片选线
         let dc = peripherals.GPIO40; // LCD 数据/命令选择线
 
-        let result = spi::init(peripherals.SPI2, sck, mosi, miso).await;
+        let result = spi::init(peripherals.SPI2, sck, mosi, miso, cs).await;
         if result.is_err() {
             warn!("Failed to initialize SPI interface");
             return;
@@ -223,5 +223,36 @@ async fn main(spawner: Spawner) {
                 init_result.err()
             );
         }
+
+        // 等待显示初始化完成
+        embassy_time::Timer::after_millis(100).await;
+
+        // 显示一些内容来验证驱动是否正常工作
+        use embedded_graphics::pixelcolor::Rgb565;
+        use embedded_graphics::prelude::*;
+        use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
+
+        // 填充整个屏幕为绿色
+        let fill_result = display.fill_screen(Rgb565::GREEN);
+        if fill_result.is_err() {
+            warn!("Failed to fill screen with green color");
+        }
+
+        // 绘制一个红色矩形
+        let red_square = Rectangle::new(Point::new(50, 50), Size::new(100, 100))
+            .into_styled(PrimitiveStyle::with_fill(Rgb565::RED));
+        let _ = red_square.draw(&mut display);
+
+        // 绘制一个蓝色圆形
+        use embedded_graphics::primitives::{Circle, PrimitiveStyleBuilder};
+        let style = PrimitiveStyleBuilder::new()
+            .fill_color(Rgb565::BLUE)
+            .build();
+        let circle = Circle::new(Point::new(120, 160), 30).into_styled(style);
+        let _ = circle.draw(&mut display);
+
+        // 将SPI总线还回，以便其他组件可以使用它
+        let spi = display.release_spi();
+        guard.replace(spi);
     }
 }

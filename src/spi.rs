@@ -1,12 +1,12 @@
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex as EmbassyMutex;
+use esp_hal::Blocking;
 use esp_hal::dma::{DmaChannelFor, DmaRxBuf, DmaTxBuf};
 use esp_hal::gpio::interconnect::{PeripheralInput, PeripheralOutput};
+use esp_hal::spi::Mode;
 use esp_hal::spi::master::{AnySpi, ConfigError, Instance};
 use esp_hal::spi::master::{Config, Spi, SpiDmaBus};
-use esp_hal::spi::Mode;
 use esp_hal::time::Rate;
-use esp_hal::Blocking;
 
 pub static SPI_WITH_DMA: EmbassyMutex<CriticalSectionRawMutex, Option<SpiDmaBus<Blocking>>> =
     EmbassyMutex::new(None);
@@ -47,6 +47,7 @@ pub async fn init(
     sck: impl PeripheralOutput<'static>,
     mos: impl PeripheralOutput<'static>,
     mis: impl PeripheralInput<'static>,
+    cs: impl PeripheralOutput<'static>,
 ) -> Result<(), ConfigError> {
     // 初始化 SPI 接口
     let spi = Spi::new(
@@ -57,7 +58,8 @@ pub async fn init(
     )?
     .with_sck(sck)
     .with_mosi(mos)
-    .with_miso(mis);
+    .with_miso(mis)
+    .with_cs(cs);
 
     SPI.lock().await.replace(spi);
     Ok(())

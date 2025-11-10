@@ -95,58 +95,66 @@ impl<'d> ST7789<'d> {
 
     /// Initialize the display with default settings
     pub fn init(&mut self) -> Result<(), esp_hal::spi::Error> {
-        // Hardware reset if pin provided
+        // 1. 硬件复位（可选但推荐）
         if let Some(rst) = &mut self.rst {
             rst.set_low();
-            self.delay.delay_micros(10);
+            self.delay.delay_millis(10);
             rst.set_high();
-            self.delay.delay_millis(150); // 增加复位时间到150ms确保完全复位
+            self.delay.delay_millis(120); // 等待内部初始化完成
         } else {
-            // Software reset if no hardware reset pin
+            // 2. 软件复位（SWRESET）
             self.write_command(CMD_SWRESET, &[])?;
             self.delay.delay_millis(150);
         }
 
-        // Exit sleep mode
+        // 3. 退出睡眠模式（SLPOUT）
         self.write_command(CMD_SLPOUT, &[])?;
-        self.delay.delay_millis(150); // 增加延迟确保完全退出睡眠模式
+        self.delay.delay_millis(120); // 必须等待 5ms，建议 100~120ms
 
-        // Set color mode to 16-bit RGB565
-        self.write_command(CMD_COLMOD, &[0x55])?; // 0x55 = 16-bit/pixel RGB565
-        self.delay.delay_millis(10);
+        // 4. 发送初始化序列（关键寄存器配置）
+        // 设置内存数据访问控制
+        self.write_command(CMD_MADCTL, &[0x00])?; // 正常方向
 
-        // Configure display orientation and RGB mode
-        // MX=0, MY=0, MV=0: Scan from left to right, top to bottom
-        // Using RGB order as specified for ST7789V
-        self.write_command(CMD_MADCTL, &[MADCTL_RGB | MADCTL_ML])?; // 添加ML位确保正确扫描方向
+        // 设置像素格式
+        self.write_command(CMD_COLMOD, &[0x55])?; // 16-bit/pixel (RGB565)
 
-        // Set frame rate
-        self.write_command(CMD_FCS, &[0xC0])?;
-        self.write_command(CMD_CSC, &[0x03])?;
+        // PORCTRK: Porch Setting
+        self.write_command(0xB2, &[0x0C, 0x0C, 0x00, 0x33, 0x33])?;
 
-        // Set gamma correction
-        self.write_command(
-            CMD_PGC,
-            &[
-                0xD0, 0x08, 0x11, 0x08, 0x0C, 0x15, 0x39, 0x33, 0x50, 0x36, 0x13, 0x14, 0x29, 0x2D,
-            ],
-        )?;
-        
-        self.write_command(
-            CMD_NGC,
-            &[
-                0xD0, 0x08, 0x10, 0x08, 0x06, 0x06, 0x39, 0x44, 0x51, 0x0B, 0x16, 0x14, 0x2F, 0x31,
-            ],
-        )?;
+        // GATECTRL: Gate Control
+        self.write_command(0xB7, &[0x35])?;
 
-        // Display inversion on - 有些屏幕需要开启显示反转才能正常显示颜色
-        self.write_command(CMD_INVON, &[])?;
-        self.delay.delay_millis(10);
+        // VCOMS: VCOM Setting
+        self.write_command(0xBB, &[0x19])?;
 
-        // Turn on display
+        // LCMCTRL: LCM Control
+        self.write_command(0xC0, &[0x2C])?;
+
+        // VDVVRHEN: VDV and VRH Command Enable
+        self.write_command(0xC2, &[0x01, 0xFF])?;
+
+        // VRHS: VRH Set
+        self.write_command(0xC3, &[0x12])?;
+
+        // VDVS: VDV Set
+        self.write_command(0xC4, &[0x20])?;
+
+        // FRCTRL2: Frame Rate Control in Normal Mode
+        self.write_command(0xC6, &[0x0F])?; // 60Hz
+
+        // PWCTR1: Power Control 1
+        self.write_command(0xD0, &[0xA4, 0xA1])?;
+
+        // 正电压伽马校正
+        self.write_command(0xE0, &[0xD0, 0x04, 0x0D, 0x11, 0x13, 0x2B, 0x3F, 0x54, 0x4C, 0x18, 0x0D, 0x0B, 0x1F, 0x23])?;
+
+        // 负电压伽马校正
+        self.write_command(0xE1, &[0xD0, 0x04, 0x0C, 0x11, 0x13, 0x2C, 0x3F, 0x44, 0x51, 0x2F, 0x1F, 0x1F, 0x20, 0x23])?;
+
+        // 5. 开启显示（DISPON）
         self.write_command(CMD_DISPON, &[])?;
-        self.delay.delay_millis(150); // 增加延迟确保显示完全开启
-
+        self.delay.delay_millis(100);
+        
         Ok(())
     }
 
@@ -165,6 +173,7 @@ impl<'d> ST7789<'d> {
 
     /// Set the address window for drawing
     fn set_address_window(&mut self, x0: u16, y0: u16, x1: u16, y1: u16) -> Result<(), esp_hal::spi::Error> {
+        // CASET: Column Address Set
         self.write_command(
             CMD_CASET,
             &[
@@ -175,6 +184,7 @@ impl<'d> ST7789<'d> {
             ],
         )?;
         
+        // PASET: Page Address Set
         self.write_command(
             CMD_RASET,
             &[
@@ -231,7 +241,10 @@ impl<'d> ST7789<'d> {
             return Ok(());
         }
 
+        // 6. 设置显示区域（列和行地址）
         self.set_address_window(x, y, x1, y1)?;
+        
+        // 7. 开始写显存
         self.write_command(CMD_RAMWR, &[])?;
         
         self.dc.set_high(); // Data mode
@@ -286,6 +299,19 @@ impl<'d> ST7789<'d> {
             Orientation::LandscapeFlipped => MADCTL_MV | MADCTL_MY | MADCTL_RGB,
         };
         self.write_command(CMD_MADCTL, &[madctl])
+    }
+}
+
+// 添加公共访问方法以便在main.rs中能获取SPI实例
+impl<'d> ST7789<'d> {
+    /// 获取对SPI实例的可变引用
+    pub fn spi_mut(&mut self) -> &mut Spi<'d, Blocking> {
+        &mut self.spi
+    }
+    
+    /// 释放SPI实例的所有权
+    pub fn release_spi(self) -> Spi<'d, Blocking> {
+        self.spi
     }
 }
 
