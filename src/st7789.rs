@@ -209,8 +209,9 @@ impl<'d> ST7789<'d> {
         
         self.dc.set_high(); // Data mode
         let color = RawU16::from(color).into_inner();
-        // Prepare color data with byte swapping for RGB565 format
-        let color_data = [(color >> 8) as u8, (color & 0xFF) as u8];
+        // Prepare color data with correct byte order for RGB565 format (MSB first)
+        // First send high byte (MSB), then low byte (LSB)
+        let color_data = [(color & 0xFF) as u8, (color >> 8) as u8];
         self.spi.write(&color_data)?;
         
         Ok(())
@@ -252,8 +253,9 @@ impl<'d> ST7789<'d> {
         let color = RawU16::from(color).into_inner();
         let count = w as usize * h as usize;
         
-        // Prepare color data with byte swapping for RGB565 format
-        let color_data = [(color >> 8) as u8, (color & 0xFF) as u8];
+        // Prepare color data with correct byte order for RGB565 format (MSB first)
+        // First send high byte (MSB), then low byte (LSB)
+        let color_data = [(color & 0xFF) as u8, (color >> 8) as u8];
         
         // 使用批量写入优化性能
         // 创建足够大的缓冲区来保存所有像素数据

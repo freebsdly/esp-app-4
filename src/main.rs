@@ -113,6 +113,7 @@ mod spi;
 mod st7789;
 mod wifi;
 mod xl9555;
+mod sensor;
 
 // 创建 esp-idf bootloader 所需的默认应用程序描述符
 // 更多信息请参见: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
