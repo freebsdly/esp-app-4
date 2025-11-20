@@ -57,6 +57,7 @@ embedded-hal = "1.0.0"
 critical-section = "1.2.0"
 static_cell = "2.1.1"
 defmt = "1.0.1"
+heapless = "0.8.0"
 
 [profile.dev]
 # Rust debug is too slow.

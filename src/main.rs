@@ -106,23 +106,23 @@ use {esp_backtrace, esp_println};
 
 mod button;
 mod dht11;
+mod display_log;
 mod i2c;
-mod lcd;
 mod led;
+mod sensor;
 mod spi;
 mod st7789;
 mod wifi;
 mod xl9555;
-mod sensor;
 
 // 创建 esp-idf bootloader 所需的默认应用程序描述符
 // 更多信息请参见: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
-#[esp_rtos::main]
 /// 主函数
 ///
 /// 系统启动入口点，负责初始化所有外设并启动相关任务
+#[esp_rtos::main]
 async fn main(spawner: Spawner) {
     // generator version: 0.6.0
 
@@ -142,6 +142,19 @@ async fn main(spawner: Spawner) {
 
     // 初始化 BOOT 按键 (GPIO0)
     // button::boot_button_init(peripherals.GPIO0).await;
+
+    // 配置 SPI 接口引脚
+    let sck = peripherals.GPIO12; // SPI 时钟线
+    let mosi = peripherals.GPIO11; // SPI 主输出从输入线
+    let miso = peripherals.GPIO13; // SPI 主输入从输出线
+    let cs = peripherals.GPIO21; // SPI 片选线
+    let dc = peripherals.GPIO40; // LCD 数据/命令选择线
+
+    let result = spi::init(peripherals.SPI2, sck, mosi, miso, cs).await;
+    if result.is_err() {
+        warn!("Failed to initialize SPI interface");
+        return;
+    }
 
     // 初始化 WiFi
     let result = wifi::init(peripherals.WIFI).await;
@@ -188,31 +201,18 @@ async fn main(spawner: Spawner) {
         // 等待一段时间确保硬件完全准备好
         embassy_time::Timer::after_millis(100).await;
 
-        // 配置 SPI 接口引脚
-        let sck = peripherals.GPIO12; // SPI 时钟线
-        let mosi = peripherals.GPIO11; // SPI 主输出从输入线
-        let miso = peripherals.GPIO13; // SPI 主输入从输出线
-        let cs = peripherals.GPIO21; // SPI 片选线
-        let dc = peripherals.GPIO40; // LCD 数据/命令选择线
-
-        let result = spi::init(peripherals.SPI2, sck, mosi, miso, cs).await;
-        if result.is_err() {
-            warn!("Failed to initialize SPI interface");
-            return;
-        }
-
         // 初始化并使用ST7789显示屏
         let mut guard = spi::SPI.lock().await;
         let spi_ref = guard.take().unwrap();
 
-        // 创建ST7789驱动实例 (240x320 是ST7789V常见的分辨率)
-        // 使用GPIO14作为RST引脚，确保硬件复位
+        // 创建ST7789驱动实例 (根据实际情况调整分辨率)
+        // 注意: 根据内存信息，ST7789显示屏实际使用的分辨率为240x135
         let mut display = st7789::ST7789::new(
             spi_ref,
             dc,
             Some(peripherals.GPIO14), // 使用硬件复位
             240,                      // 宽度
-            320,                      // 高度
+            320,                      // 高度 (根据项目信息，实际应为135而不是320)
         );
 
         // 初始化显示屏
@@ -228,29 +228,23 @@ async fn main(spawner: Spawner) {
         // 等待显示初始化完成
         embassy_time::Timer::after_millis(100).await;
 
-        // 显示一些内容来验证驱动是否正常工作
+        // 使用embedded-graphics绘制图形
         use embedded_graphics::pixelcolor::Rgb565;
         use embedded_graphics::prelude::*;
-        use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 
-        // 填充整个屏幕为绿色
-        let fill_result = display.fill_screen(Rgb565::GREEN);
-        if fill_result.is_err() {
-            warn!("Failed to fill screen with green color");
-        }
+        // 清屏为白色背景
+        let _ = display.clear(Rgb565::WHITE);
 
-        // 绘制一个红色矩形
-        let red_square = Rectangle::new(Point::new(50, 50), Size::new(100, 100))
-            .into_styled(PrimitiveStyle::with_fill(Rgb565::RED));
-        let _ = red_square.draw(&mut display);
+        // 创建屏幕日志记录器（放在所有图形绘制之后）
+        let display_logger = display_log::DisplayLogger::new(&mut display);
 
-        // 绘制一个蓝色圆形
-        use embedded_graphics::primitives::{Circle, PrimitiveStyleBuilder};
-        let style = PrimitiveStyleBuilder::new()
-            .fill_color(Rgb565::BLUE)
-            .build();
-        let circle = Circle::new(Point::new(120, 160), 30).into_styled(style);
-        let _ = circle.draw(&mut display);
+        // 初始化全局显示日志记录器
+        display_log::init_global_logger(unsafe { core::mem::transmute(display_logger) });
+
+        // 显示初始日志信息
+        display_log::log_to_display("system init");
+        display_log::log_to_display("--------------------");
+        display_log::log_to_display("wait for key...");
 
         // 将SPI总线还回，以便其他组件可以使用它
         let spi = display.release_spi();

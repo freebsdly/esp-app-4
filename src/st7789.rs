@@ -211,7 +211,7 @@ impl<'d> ST7789<'d> {
         let color = RawU16::from(color).into_inner();
         // Prepare color data with correct byte order for RGB565 format (MSB first)
         // First send high byte (MSB), then low byte (LSB)
-        let color_data = [(color & 0xFF) as u8, (color >> 8) as u8];
+        let color_data = [(color >> 8) as u8, (color & 0xFF) as u8];
         self.spi.write(&color_data)?;
         
         Ok(())
@@ -255,7 +255,7 @@ impl<'d> ST7789<'d> {
         
         // Prepare color data with correct byte order for RGB565 format (MSB first)
         // First send high byte (MSB), then low byte (LSB)
-        let color_data = [(color & 0xFF) as u8, (color >> 8) as u8];
+        let color_data = [(color >> 8) as u8, (color & 0xFF) as u8];
         
         // 使用批量写入优化性能
         // 创建足够大的缓冲区来保存所有像素数据
@@ -326,19 +326,34 @@ impl<'d> DrawTarget for ST7789<'d> {
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
         for Pixel(coord, color) in pixels.into_iter() {
-            self.draw_pixel(coord.x as u16, coord.y as u16, color)?;
+            // Check bounds before drawing
+            if coord.x >= 0 && coord.y >= 0 && 
+               (coord.x as u16) < self.width && (coord.y as u16) < self.height {
+                self.draw_pixel(coord.x as u16, coord.y as u16, color)?;
+            }
         }
         Ok(())
     }
 
     fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
-        self.fill_rectangle(
-            area.top_left.x as u16,
-            area.top_left.y as u16,
-            area.size.width as u16,
-            area.size.height as u16,
-            color,
-        )
+        // Convert rectangle coordinates to display coordinates
+        let x = area.top_left.x.max(0) as u16;
+        let y = area.top_left.y.max(0) as u16;
+        let width = area.size.width as u16;
+        let height = area.size.height as u16;
+        
+        // Make sure we don't exceed display boundaries
+        if x < self.width && y < self.height {
+            let w = width.min(self.width - x);
+            let h = height.min(self.height - y);
+            self.fill_rectangle(x, y, w, h, color)
+        } else {
+            Ok(())
+        }
+    }
+    
+    fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
+        self.fill_screen(color)
     }
 }
 

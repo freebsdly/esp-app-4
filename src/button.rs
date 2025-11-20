@@ -1,4 +1,5 @@
-use crate::i2c;
+use alloc::format;
+use crate::{display_log, i2c};
 use crate::xl9555::{io_bits, read_input_ports, set_spi_lcd_power_state};
 use defmt::{error, info};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -55,7 +56,7 @@ static BL_STATE: EmbassyMutex<CriticalSectionRawMutex, bool> = EmbassyMutex::new
 pub static CURRENT_COLOR: EmbassyMutex<CriticalSectionRawMutex, DisplayColor> =
     EmbassyMutex::new(DisplayColor::Red);
 // 添加蜂鸣器状态跟踪
-static BEEP_STATE: EmbassyMutex<CriticalSectionRawMutex, bool> = EmbassyMutex::new(false);
+static BEEP_STATE: EmbassyMutex<CriticalSectionRawMutex, bool> = EmbassyMutex::new(true);
 
 pub async fn boot_button_init(button: impl InputPin + 'static) {
     let mut boot_button = Input::new(button, InputConfig::default());
@@ -91,6 +92,15 @@ fn toggle_lcd_backlight(i2c_ref: &mut I2c<Blocking>) -> Result<(), I2cError> {
         if new_bl_state { "ON" } else { "OFF" }
     );
 
+    // 在屏幕上显示日志
+    display_log::log_to_display(
+        if new_bl_state {
+            "LCD backlight: on"
+        } else {
+            "LCD backlight: off"
+        }
+    );
+
     Ok(())
 }
 
@@ -112,7 +122,7 @@ fn set_beep_state(i2c_ref: &mut I2c<Blocking>, state: bool) -> Result<(), I2cErr
         &[crate::xl9555::registers::OUTPUT_PORT_0],
         &mut port0_data,
     )?;
-    
+
     // 根据状态设置蜂鸣器引脚 (P0.3)
     let new_port0_data = if state {
         port0_data[0] | (io_bits::BEEP_IO) as u8 // 设置P0.3为高电平
@@ -152,6 +162,15 @@ fn toggle_beep(i2c_ref: &mut I2c<Blocking>) -> Result<(), I2cError> {
     info!(
         "BEEP is now {}",
         if new_beep_state { "OFF" } else { "ON" }  // 修正逻辑：低电平触发蜂鸣器
+    );
+
+    // 在屏幕上显示日志
+    crate::display_log::log_to_display(
+        if new_beep_state {
+            "beep: off"
+        } else {
+            "beep: on"
+        }
     );
 
     Ok(())
@@ -209,7 +228,10 @@ pub async fn read_keys() {
                 if current_states[i] && !key_states[i] {
                     // 按键刚被按下
                     match i {
-                        0 => info!("KEY0 pressed"),
+                        0 => {
+                            info!("KEY0 pressed");
+                            display_log::log_to_display("pressed key0");
+                        },
                         1 => {
                             info!("KEY1 pressed - toggling LCD backlight");
                             // 切换背光状态
@@ -228,8 +250,20 @@ pub async fn read_keys() {
                             // 切换屏幕颜色
                             drop(key_states); // 释放锁，以便获取颜色状态锁
                             let mut current_color = CURRENT_COLOR.try_lock().unwrap();
+                            let _old_color = *current_color; // 添加下划线前缀表示故意不使用
                             *current_color = current_color.next();
                             info!("Display color switched to {:?}", *current_color);
+
+                            // 在屏幕上显示日志
+                            let color_name = match *current_color {
+                                DisplayColor::Red => "red",
+                                DisplayColor::Green => "green",
+                                DisplayColor::Blue => "blue",
+                                DisplayColor::White => "white",
+                                DisplayColor::Black => "black",
+                            };
+                            display_log::log_to_display(&format!("screen color: {}", color_name));
+
                             key_states = KEY_STATES.try_lock().unwrap(); // 重新获取锁
                         }
                         3 => {

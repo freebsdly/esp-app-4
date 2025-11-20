@@ -1,3 +1,5 @@
+use crate::display_log;
+use alloc::format;
 use defmt::{info, warn};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex as EmbassyMutex;
@@ -47,10 +49,21 @@ pub async fn wifi_scan() {
                         network.channel,
                         network.auth_method
                     );
+                    // display_log::log_to_display(
+                    //     format!(
+                    //         "SSID: {}, Channel: {}, RSSI: {:?}",
+                    //         core::str::from_utf8((&network.ssid).as_ref())
+                    //             .unwrap_or("<invalid utf-8>"),
+                    //         network.channel,
+                    //         network.auth_method
+                    //     )
+                    //     .as_str(),
+                    // );
                 }
             }
             Err(err) => {
                 warn!("Wi-Fi scan failed: {}", err);
+                // display_log::log_to_display(format!("Wi-Fi scan failed: {}", err).as_str());
             }
         }
     }
