@@ -8,19 +8,21 @@ use defmt::{info, warn};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex as EmbassyMutex;
 use embassy_time::Timer;
+use esp_hal::delay::Delay;
 use esp_hal::gpio::Level;
 use esp_hal::gpio::{Flex, InputConfig, InputPin, OutputConfig, OutputPin, Pull};
-use esp_hal::delay::Delay;
 
 /// DHT11传感器读取错误类型
 #[derive(Debug)]
 pub enum Dht11Error {
-    /// 校验和错误
+    // 校验和错误
     ChecksumMismatch,
-    /// 传感器无响应
+    // 传感器无响应
     NoResponse,
-    /// 信号超时
+    // 信号超时
     Timeout,
+    // 未期待的电平
+    UnExpectedPinLevel,
 }
 
 // 为Dht11Error实现defmt::Format trait，以便可以使用defmt打印错误
@@ -35,6 +37,9 @@ impl defmt::Format for Dht11Error {
             }
             Dht11Error::Timeout => {
                 defmt::write!(f, "Timeout waiting for signal");
+            }
+            Dht11Error::UnExpectedPinLevel => {
+                defmt::write!(f, "unexpected pin level error");
             }
         }
     }
@@ -102,36 +107,38 @@ pub async fn read_dht11() -> Result<Dht11Data, Dht11Error> {
     // 创建硬件级延时实例
     let mut delay = Delay::new();
 
-    // 初始化总线（高电平稳定）
-    flex_pin.set_high();
+    // === 关键修复1：使用开漏输出模式 ===
+    // 配置为开漏输出，配合外部上拉电阻（参考C版本GPIO_MODE_INPUT_OUTPUT_OD）
     flex_pin.apply_output_config(
         &OutputConfig::default()
-            .with_pull(Pull::Up)
-            .with_drive_strength(esp_hal::gpio::DriveStrength::_20mA),
+            .with_pull(Pull::None)
+            .with_drive_mode(esp_hal::gpio::DriveMode::OpenDrain),
     );
     flex_pin.set_output_enable(true);
-    delay.delay_micros(10000); // 10ms 高电平，稳定总线
-
-    // 步骤 1：主机发起请求
-    // 主机将数据线拉低 20ms
-    flex_pin.set_low();
-    delay.delay_micros(20000); // 20ms
-
-    // 然后释放（上拉）总线并切换为输入模式
     flex_pin.set_high();
+
+    // 步骤2：主机发起请求（拉低20ms）
+    flex_pin.set_low();
+    delay.delay_millis(19);
+
+    // 2. 主机释放总线（输出高电平），让上拉电阻工作
+    flex_pin.set_high();
+    delay.delay_micros(32); // 主机拉高10-35us（参考C版本）
+
+    // 3. 切换到输入模式等待传感器响应
+    flex_pin.set_output_enable(false);
+    flex_pin.apply_input_config(&InputConfig::default().with_pull(Pull::None));
     flex_pin.set_input_enable(true);
-    flex_pin.apply_input_config(&InputConfig::default().with_pull(Pull::None)); // 高阻输入
-    delay.delay_micros(40); // 等待传感器响应
 
-    // 步骤 2：DHT11 响应
-    // 等待传感器响应（80us 低电平，80us 高电平）
-    wait_for_level(&mut *flex_pin, Level::Low, 200, &mut delay)?;
-    wait_for_level(&mut *flex_pin, Level::High, 200, &mut delay)?;
-
+    // 等待传感器响应（80us低电平 + 80us高电平）
+    wait_for_with_level(flex_pin, Level::Low, 80, &mut delay)?; // 等待80us低电平
+    wait_for_with_level(flex_pin, Level::High, 80, &mut delay)?; // 等待80us高电平
     // 步骤 3：数据传输（共 40 位）
     // DHT11 发送 40 位数据，格式如下：
-    // [湿度高位] [湿度低位] [温度高位] [温度低位] [校验和]
+    // [湿度整数] [湿度小数] [温度整数] [温度小数] [校验和]
+    // 校验和数据等于“8bit湿度整数数据+8bit湿度小数数据 +8bi温度整数数据+8bit温度小数数据”所得结果的末8位
     // 每个字节 8 位，共 5 字节
+
     let mut data = [0u8; 5];
     for byte in &mut data {
         *byte = read_byte(flex_pin, &mut delay)?;
@@ -140,13 +147,21 @@ pub async fn read_dht11() -> Result<Dht11Data, Dht11Error> {
     // 等待结束
     wait_for_level(flex_pin, Level::Low, 100, &mut delay)?;
 
+    // 在读取完成后打印原始数据用于调试
+    info!(
+        "Raw data: [{}, {}, {}, {}, {}]",
+        data[0], data[1], data[2], data[3], data[4]
+    );
+
     // 校验数据
     // 校验和 = 湿度高位 + 湿度低位 + 温度高位 + 温度低位
-    let checksum = data[0]
-        .wrapping_add(data[1])
-        .wrapping_add(data[2])
-        .wrapping_add(data[3]);
-    if checksum != data[4] {
+    // 增强校验和验证
+    let calculated_checksum = data
+        .iter()
+        .take(4)
+        .fold(0u8, |sum, &val| sum.wrapping_add(val));
+
+    if calculated_checksum != data[4] {
         return Err(Dht11Error::ChecksumMismatch);
     }
 
@@ -188,28 +203,32 @@ impl DHT11 {
 /// * `Ok(u8)` - 成功读取的字节
 /// * `Err(Dht11Error)` - 读取过程中发生的错误
 fn read_byte(pin: &mut Flex<'_>, delay: &mut Delay) -> Result<u8, Dht11Error> {
-    let mut data = 0u8;
+    let mut byte = 0u8;
 
     for i in 0..8 {
-        // 1. 等待数据位的低电平（固定50us）
-        wait_for_level(pin, Level::Low, 100, delay)?;
-        
-        // 2. 等待高电平开始（传感器拉低结束）
-        wait_for_level(pin, Level::High, 100, delay)?;
-        
-        // 3. 延时45us（临界点：28us < 45us < 70us）
-        delay.delay_micros(45);
-        
-        // 4. 读取当前电平：高1，低0
-        if pin.level() == Level::High {
-            data |= 1 << (7 - i); // 高位在前
+        // 等待高电平开始（每个bit以50us低电平开始，上升沿算10us)
+        wait_for_level(pin, Level::High, 55, delay)?;
+        // 上升沿， 等待电平稳定
+        delay.delay_micros(5);
+        if pin.is_high() {
+            // bit=0 时高电平持续26-28us
+            // bit=1 时高电平持续70us
+            // 加上下降沿 10us
+            delay.delay_micros(40);
+            if pin.is_high() {
+                // 说明仍处于高电平，则bit=1
+                byte |= 1 << (7 - i);
+                delay.delay_micros(30);
+            } else {
+                // 已经是低电平
+                // 说明bit=0
+            }
+        } else {
+            // TODO: 50us低电平过后应该为高电平，否则数据有误
+            return Err(Dht11Error::UnExpectedPinLevel);
         }
-        
-        // 5. 等待当前数据位的高电平结束（避免影响下一位）
-        wait_for_level(pin, Level::Low, 100, delay)?;
     }
-
-    Ok(data)
+    Ok(byte)
 }
 
 /// 等待引脚达到目标电平，超时返回错误（单位：微秒）
@@ -219,34 +238,99 @@ fn wait_for_level(
     timeout_us: u32,
     delay: &mut Delay,
 ) -> Result<(), Dht11Error> {
-    for _ in 0..timeout_us {
+    let step_us = 1u32; // 更精细的1us间隔检测
+    let mut waited = 0u32;
+
+    while waited < timeout_us {
         if pin.level() == target_level {
             return Ok(());
         }
-        delay.delay_micros(1);
+        delay.delay_micros(step_us);
+        waited += step_us;
     }
+
     Err(Dht11Error::Timeout)
+}
+
+/// 等待引脚处于目标电平指定时间
+fn wait_for_with_level(
+    pin: &mut Flex<'_>,
+    target_level: Level,
+    us: u32,
+    delay: &mut Delay,
+) -> Result<(), Dht11Error> {
+    let step_us = 1u32; // 更精细的1us间隔检测
+    let mut waited = 0u32;
+
+    while waited < us {
+        if pin.level() == target_level {
+            delay.delay_micros(step_us);
+            waited += step_us;
+        } else {
+            return Err(Dht11Error::UnExpectedPinLevel);
+        }
+    }
+
+    Ok(())
+}
+
+/// 硬件检查函数（验证外部上拉电阻）
+pub async fn check_hardware_config() -> bool {
+    let mut guard = DHT11_PIN.lock().await;
+    let flex_pin = guard.as_mut().unwrap();
+    let mut delay = Delay::new();
+
+    info!("=== DHT11 Hardware Configuration Check ===");
+
+    // 测试外部上拉电阻
+    flex_pin.apply_input_config(&InputConfig::default().with_pull(Pull::None));
+    flex_pin.set_input_enable(true);
+    delay.delay_millis(10);
+
+    let external_pull_level = flex_pin.level();
+    info!(
+        "Bus level with external pull-up only: {:?}",
+        external_pull_level
+    );
+
+    // 关键检查：必须有外部上拉电阻将总线拉高
+    if external_pull_level != Level::High {
+        warn!("CRITICAL: External 5kΩ pull-up resistor is missing or not working!");
+        warn!("Please add a 4.7kΩ-5kΩ resistor between DATA pin and VCC");
+        return false;
+    }
+
+    info!("✓ External pull-up resistor is working correctly");
+    info!("=== Hardware Check Complete ===");
+    true
 }
 
 /// DHT11传感器任务，定期读取并打印温湿度数据
 #[embassy_executor::task]
 pub async fn dht11_task() {
+    // 先检查硬件配置
+    if !check_hardware_config().await {
+        warn!("DHT11 hardware configuration issue, sensor may not work!");
+    }
+
     let dht11 = DHT11::new();
     loop {
         match dht11.read().await {
             Ok(data) => {
                 info!(
-                    "Temperature: {}°C, Humidity: {}%RH",
+                    "Temperature: {:01}°C, Humidity: {:01}%",
                     data.temperature(),
                     data.humidity()
                 );
             }
             Err(e) => {
-                warn!("Failed to read DHT11 sensor: {:?}", e);
+                warn!("DHT11 read error: {:?}", e);
+                // 增加错误后的延时
+                Timer::after_secs(3).await;
+                continue;
             }
         }
 
-        // DHT11传感器每次读取后必须等待至少2秒才能进行下一次读取
-        Timer::after_secs(2).await;
+        Timer::after_secs(2).await; // DHT11要求至少2秒间隔
     }
 }

@@ -207,31 +207,6 @@ pub async fn set_lcd_backlight(state: bool) -> Result<(), I2cError> {
     i2c::with_i2c(|i2c_ref| set_spi_lcd_power_state(i2c_ref, state)).await
 }
 
-/// 公共接口函数：控制蜂鸣器开关
-///
-/// 通过该函数可以外部调用设置蜂鸣器的开关状态
-/// 控制的是 XL9555 的 P0.3 引脚
-///
-/// # 参数
-/// * `state` - 蜂鸣器状态，true 表示开启蜂鸣器，false 表示关闭蜂鸣器
-pub async fn set_beep(state: bool) -> Result<(), I2cError> {
-    i2c::with_i2c(|i2c_ref| {
-        // 读取当前端口0输出状态
-        let mut port0_data = [0u8];
-        i2c_ref.write_read(XL9555_ADDR, &[registers::OUTPUT_PORT_0], &mut port0_data)?;
-        
-        // 根据状态设置蜂鸣器引脚 (P0.3)
-        let new_port0_data = if state {
-            port0_data[0] | (io_bits::BEEP_IO) as u8 // 设置P0.3为高电平
-        } else {
-            port0_data[0] & !((io_bits::BEEP_IO) as u8) // 设置P0.3为低电平
-        };
-
-        // 写回端口0输出
-        i2c_ref.write(XL9555_ADDR, &[registers::OUTPUT_PORT_0, new_port0_data])
-    }).await
-}
-
 /// 初始化ATK-MD0240模块
 /// 执行硬件复位序列：RST引脚拉低至少10微秒，然后拉高并延时120毫秒等待复位完成
 pub async fn init_atk_md0240() -> Result<(), I2cError> {

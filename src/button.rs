@@ -56,7 +56,7 @@ static BL_STATE: EmbassyMutex<CriticalSectionRawMutex, bool> = EmbassyMutex::new
 pub static CURRENT_COLOR: EmbassyMutex<CriticalSectionRawMutex, DisplayColor> =
     EmbassyMutex::new(DisplayColor::Red);
 // 添加蜂鸣器状态跟踪
-static BEEP_STATE: EmbassyMutex<CriticalSectionRawMutex, bool> = EmbassyMutex::new(true);
+static BEEP_STATE: EmbassyMutex<CriticalSectionRawMutex, bool> = EmbassyMutex::new(false);
 
 pub async fn boot_button_init(button: impl InputPin + 'static) {
     let mut boot_button = Input::new(button, InputConfig::default());

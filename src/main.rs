@@ -104,6 +104,7 @@ use esp_hal::timer::timg::TimerGroup;
 #[allow(unused)]
 use {esp_backtrace, esp_println};
 
+mod ap3216c;
 mod button;
 mod dht11;
 mod display_log;
@@ -180,6 +181,18 @@ async fn main(spawner: Spawner) {
     if result.is_err() {
         info!("Failed to initialize XL9555 GPIO expander");
     } else {
+        // 初始化 AP3216C 传感器
+        let mut ap3216c_sensor = ap3216c::Ap3216c::new();
+        let result = ap3216c_sensor.init().await;
+        if result.is_err() {
+            info!("Failed to initialize AP3216C sensor");
+        } else {
+            let result = spawner.spawn(ap3216c::ap3216c_task(ap3216c_sensor));
+            if result.is_err() {
+                info!("Failed to spawn AP3216C task");
+            }
+        }
+
         // 启动按键检测任务
         let result = spawner.spawn(button::read_keys());
         if result.is_err() {
@@ -212,7 +225,7 @@ async fn main(spawner: Spawner) {
             dc,
             Some(peripherals.GPIO14), // 使用硬件复位
             240,                      // 宽度
-            320,                      // 高度 (根据项目信息，实际应为135而不是320)
+            320,                      // 高度
         );
 
         // 初始化显示屏
