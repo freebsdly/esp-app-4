@@ -171,11 +171,11 @@ async fn main(spawner: Spawner) {
         }
     }
 
-    dht11::dht11_init(peripherals.GPIO0).await;
-    let result = spawner.spawn(dht11::dht11_task());
-    if result.is_err() {
-        info!("Failed to spawn dht11 task");
-    }
+    // dht11::dht11_init(peripherals.GPIO0).await;
+    // let result = spawner.spawn(dht11::dht11_task());
+    // if result.is_err() {
+    //     info!("Failed to spawn dht11 task");
+    // }
 
     // 初始化 XL9555 GPIO 扩展芯片
     // 使用 I2C0 接口，SDA 连接 GPIO41，SCL 连接 GPIO42
@@ -185,28 +185,28 @@ async fn main(spawner: Spawner) {
         info!("Failed to initialize XL9555 GPIO expander");
     } else {
         // 初始化 AP3216C 传感器
-        let mut ap3216c_sensor = ap3216c::Ap3216c::new();
-        let result = ap3216c_sensor.init().await;
-        if result.is_err() {
-            info!("Failed to initialize AP3216C sensor");
-        } else {
-            let result = spawner.spawn(ap3216c::ap3216c_task(ap3216c_sensor));
-            if result.is_err() {
-                info!("Failed to spawn AP3216C task");
-            }
-        }
+        // let mut ap3216c_sensor = ap3216c::Ap3216c::new();
+        // let result = ap3216c_sensor.init().await;
+        // if result.is_err() {
+        //     info!("Failed to initialize AP3216C sensor");
+        // } else {
+        //     let result = spawner.spawn(ap3216c::ap3216c_task(ap3216c_sensor));
+        //     if result.is_err() {
+        //         info!("Failed to spawn AP3216C task");
+        //     }
+        // }
 
         // 初始化 QMA6100P 加速度传感器
-        let mut qma6100p_sensor = qma6100p::Qma6100p::new(qma6100p::QMA6100P_ADDR_AD0_LOW);
-        let result = qma6100p_sensor.init().await;
-        if result.is_err() {
-            info!("Failed to initialize QMA6100P sensor");
-        } else {
-            let result = spawner.spawn(qma6100p::qma6100p_task(qma6100p_sensor));
-            if result.is_err() {
-                info!("Failed to spawn QMA6100P task");
-            }
-        }
+        // let mut qma6100p_sensor = qma6100p::Qma6100p::new(qma6100p::QMA6100P_ADDR_AD0_LOW);
+        // let result = qma6100p_sensor.init().await;
+        // if result.is_err() {
+        //     info!("Failed to initialize QMA6100P sensor");
+        // } else {
+        //     let result = spawner.spawn(qma6100p::qma6100p_task(qma6100p_sensor));
+        //     if result.is_err() {
+        //         info!("Failed to spawn QMA6100P task");
+        //     }
+        // }
 
         // 启动按键检测任务
         let result = spawner.spawn(button::read_keys());
@@ -281,9 +281,34 @@ async fn main(spawner: Spawner) {
         // 初始化OV5640摄像头
         info!("Initializing OV5640 camera...");
         
-        // 创建OV5640配置 - 使用PSRAM优化配置和VGA分辨率
-        let mut ov5640_config = ov5640::OV5640Config::performance_optimized();
-        ov5640_config = ov5640::OV5640Config::with_power_scheme_a();
+        // 创建OV5640配置 - 使用PSRAM优化配置和QVGA分辨率
+        let mut ov5640_config = ov5640::OV5640Config::with_power_scheme_a();
+        
+        // 配置摄像头引脚（根据实际硬件连接设置）
+        ov5640_config.base_config.pins = camera::CameraPins {
+            pin_pwdn: None, // 如果有PWDN引脚，请设置为Some(peripherals.GPIOXX.into())
+            pin_reset: None, // 如果有RESET引脚，请设置为Some(peripherals.GPIOXX.into())
+            pin_xclk: peripherals.GPIO3.into(), // XCLK引脚
+            pin_sccb_sda: peripherals.GPIO4.into(), // SCCB SDA引脚
+            pin_sccb_scl: peripherals.GPIO5.into(), // SCCB SCL引脚
+            pin_d7: peripherals.GPIO39.into(), // 数据位7
+            pin_d6: peripherals.GPIO38.into(), // 数据位6
+            pin_d5: peripherals.GPIO37.into(), // 数据位5
+            pin_d4: peripherals.GPIO36.into(), // 数据位4
+            pin_d3: peripherals.GPIO9.into(), // 数据位3 (GPIO9未被使用)
+            pin_d2: peripherals.GPIO10.into(), // 数据位2 (GPIO10未被使用)
+            pin_d1: peripherals.GPIO15.into(), // 数据位1 (GPIO15未被使用)
+            pin_d0: peripherals.GPIO16.into(), // 数据位0 (GPIO16未被使用)
+            pin_vsync: peripherals.GPIO6.into(), // 垂直同步
+            pin_href: peripherals.GPIO7.into(), // 行参考
+            pin_pclk: peripherals.GPIO8.into(), // 像素时钟
+        };
+        ov5640_config.base_config.xclk_freq_hz = 20_000_000; // 设置XCLK频率为20MHz
+        // 使用更小的分辨率以减少内存使用
+        ov5640_config.base_config.frame_size = camera::FrameSize::Qvga; // 320x240
+        ov5640_config.base_config.pixel_format = camera::PixelFormat::Rgb565;
+        ov5640_config.base_config.fb_location = camera::FrameBufferLocation::InPsram;
+        ov5640_config.base_config.fb_count = 1; // 使用单缓冲以减少内存使用
             
         // 创建OV5640摄像头实例
         let mut ov5640_camera = ov5640::OV5640Camera::new(ov5640_config);
@@ -293,8 +318,8 @@ async fn main(spawner: Spawner) {
             Ok(()) => {
                 info!("OV5640 camera initialized successfully");
                 
-                // 测试摄像头性能
-                match ov5640_camera.test_performance(5).await {
+                // 测试摄像头性能（使用更少的帧数以减少内存压力）
+                match ov5640_camera.test_performance(2).await {
                     Ok(performance) => {
                         info!("Camera performance test: {} FPS, avg frame size: {} bytes", 
                               performance.fps, performance.avg_size);

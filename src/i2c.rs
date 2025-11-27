@@ -46,3 +46,31 @@ where
     let mut i2c_ref = guard.as_mut().unwrap();
     f(&mut i2c_ref)
 }
+
+/// SCCB/I2C 写操作
+/// 
+/// # 参数
+/// * `addr` - 设备地址
+/// * `reg` - 寄存器地址
+/// * `value` - 要写入的值
+pub async fn sccb_write(addr: u8, reg: u8, value: u8) -> Result<(), I2cError> {
+    with_i2c(|i2c| {
+        i2c.write(addr, &[reg, value])
+    }).await
+}
+
+/// SCCB/I2C 读操作
+/// 
+/// # 参数
+/// * `addr` - 设备地址
+/// * `reg` - 寄存器地址
+/// 
+/// # 返回值
+/// 读取到的值
+pub async fn sccb_read(addr: u8, reg: u8) -> Result<u8, I2cError> {
+    with_i2c(|i2c| {
+        let mut value = [0u8];
+        i2c.write_read(addr, &[reg], &mut value)?;
+        Ok(value[0])
+    }).await
+}

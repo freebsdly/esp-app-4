@@ -311,11 +311,21 @@ impl<'a> Camera<'a> {
             FrameSize::Qxga => (2048, 1536),
         };
 
+        // 为了减少内存使用，我们创建一个较小的帧数据
+        // 在实际实现中，这应该从摄像头硬件获取
+        let frame_data_size = (width as usize) * (height as usize) * 2; // RGB565格式每个像素2字节
+        let data = if frame_data_size > 100000 { // 如果大于100KB，只分配10KB
+            info!("Frame size too large, allocating smaller buffer for testing");
+            alloc::vec![0; 10000] // 只分配10KB用于测试
+        } else {
+            alloc::vec![0; frame_data_size]
+        };
+
         let frame = CameraFrame {
             width,
             height,
             format: self.config.pixel_format,
-            data: alloc::vec![0; (width as usize) * (height as usize)], // Dummy data
+            data,
         };
 
         Ok(frame)
