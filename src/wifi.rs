@@ -1,5 +1,3 @@
-use crate::display_log;
-use alloc::format;
 use defmt::{info, warn};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex as EmbassyMutex;

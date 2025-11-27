@@ -150,7 +150,7 @@ pub mod constants {
     
     /// Power requirements
     pub mod power {
-        use crate::ov5640::{constants, PowerSavingMode};
+        use crate::ov5640::PowerSavingMode;
 
         /// Analog power supply voltage range in volts (recommended 2.8V)
         pub const AVDD_RANGE: (f32, f32) = (2.6, 3.0);
@@ -315,7 +315,7 @@ pub mod constants {
     /// Frame rate information for different resolutions
     pub mod frame_rates {
         use crate::camera::FrameSize;
-        
+
         /// Frame rate information structure
         #[derive(Debug, Clone, Copy)]
         pub struct FrameRateInfo {

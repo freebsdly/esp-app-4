@@ -1,5 +1,5 @@
 use alloc::format;
-use crate::{display_log, i2c};
+use crate::{console, i2c};
 use crate::xl9555::{io_bits, read_input_ports, set_spi_lcd_power_state};
 use defmt::{error, info};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -93,7 +93,7 @@ fn toggle_lcd_backlight(i2c_ref: &mut I2c<Blocking>) -> Result<(), I2cError> {
     );
 
     // 在屏幕上显示日志
-    display_log::log_to_display(
+    console::log_to_display(
         if new_bl_state {
             "LCD backlight: on"
         } else {
@@ -165,7 +165,7 @@ fn toggle_beep(i2c_ref: &mut I2c<Blocking>) -> Result<(), I2cError> {
     );
 
     // 在屏幕上显示日志
-    crate::display_log::log_to_display(
+    crate::console::log_to_display(
         if new_beep_state {
             "beep: off"
         } else {
@@ -230,7 +230,7 @@ pub async fn read_keys() {
                     match i {
                         0 => {
                             info!("KEY0 pressed");
-                            display_log::log_to_display("pressed key0");
+                            console::log_to_display("pressed key0");
                         },
                         1 => {
                             info!("KEY1 pressed - toggling LCD backlight");
@@ -262,7 +262,7 @@ pub async fn read_keys() {
                                 DisplayColor::White => "white",
                                 DisplayColor::Black => "black",
                             };
-                            display_log::log_to_display(&format!("screen color: {}", color_name));
+                            console::log_to_display(&format!("screen color: {}", color_name));
 
                             key_states = KEY_STATES.try_lock().unwrap(); // 重新获取锁
                         }

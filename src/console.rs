@@ -2,7 +2,7 @@
 //!
 //! This module provides functionality to display log messages on the ST7789 screen.
 
-use crate::st7789::ST7789;
+use crate::spi_lcd::ST7789;
 use core::cell::UnsafeCell;
 use core::fmt::Write;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;

@@ -701,7 +701,7 @@ pub struct CameraPerformance {
 /// Captures a frame from the camera and displays it on the provided display.
 pub async fn camera_capture_show(
     camera: &mut Camera<'_>,
-    display: &mut crate::st7789::ST7789<'_>,
+    display: &mut crate::spi_lcd::ST7789<'_>,
     spilcd_dir: u8,
 ) -> Result<(), &'static str> {
     // Get a frame from the camera
@@ -726,7 +726,7 @@ pub async fn camera_capture_show(
 ///
 /// Displays a camera frame on the provided display at the specified position and size.
 async fn display_image(
-    display: &mut crate::st7789::ST7789<'_>,
+    display: &mut crate::spi_lcd::ST7789<'_>,
     x: u16,
     y: u16,
     width: u16,

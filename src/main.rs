@@ -108,16 +108,17 @@ mod ap3216c;
 mod button;
 mod camera;
 mod dht11;
-mod display_log;
+mod console;
 mod i2c;
 mod led;
 mod sensor;
 mod spi;
-mod st7789;
+mod spi_lcd;
 mod wifi;
 mod xl9555;
 mod qma6100p;
 mod ov5640;
+mod rgb_lcd;
 
 // 创建 esp-idf bootloader 所需的默认应用程序描述符
 // 更多信息请参见: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -235,7 +236,7 @@ async fn main(spawner: Spawner) {
 
         // 创建ST7789驱动实例 (根据实际情况调整分辨率)
         // 注意: 根据内存信息，ST7789显示屏实际使用的分辨率为240x135
-        let mut display = st7789::ST7789::new(
+        let mut display = spi_lcd::ST7789::new(
             spi_ref,
             dc,
             Some(peripherals.GPIO14), // 使用硬件复位
@@ -264,15 +265,15 @@ async fn main(spawner: Spawner) {
         let _ = display.clear(Rgb565::WHITE);
 
         // 创建屏幕日志记录器（放在所有图形绘制之后）
-        let display_logger = display_log::DisplayLogger::new(&mut display);
+        let display_logger = console::DisplayLogger::new(&mut display);
 
         // 初始化全局显示日志记录器
-        display_log::init_global_logger(unsafe { core::mem::transmute(display_logger) });
+        console::init_global_logger(unsafe { core::mem::transmute(display_logger) });
 
         // 显示初始日志信息
-        display_log::log_to_display("system init");
-        display_log::log_to_display("--------------------");
-        display_log::log_to_display("wait for key...");
+        console::log_to_display("system init");
+        console::log_to_display("--------------------");
+        console::log_to_display("wait for key...");
 
         // 将SPI总线还回，以便其他组件可以使用它
         let spi = display.release_spi();
