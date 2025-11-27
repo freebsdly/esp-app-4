@@ -115,6 +115,7 @@ mod spi;
 mod st7789;
 mod wifi;
 mod xl9555;
+mod qma6100p;
 
 // 创建 esp-idf bootloader 所需的默认应用程序描述符
 // 更多信息请参见: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -190,6 +191,18 @@ async fn main(spawner: Spawner) {
             let result = spawner.spawn(ap3216c::ap3216c_task(ap3216c_sensor));
             if result.is_err() {
                 info!("Failed to spawn AP3216C task");
+            }
+        }
+
+        // 初始化 QMA6100P 加速度传感器
+        let mut qma6100p_sensor = qma6100p::Qma6100p::new(qma6100p::QMA6100P_ADDR_AD0_LOW);
+        let result = qma6100p_sensor.init().await;
+        if result.is_err() {
+            info!("Failed to initialize QMA6100P sensor");
+        } else {
+            let result = spawner.spawn(qma6100p::qma6100p_task(qma6100p_sensor));
+            if result.is_err() {
+                info!("Failed to spawn QMA6100P task");
             }
         }
 

@@ -641,6 +641,7 @@ dependencies = [
  "esp-radio",
  "esp-rtos",
  "heapless 0.8.0",
+ "micromath",
  "static_cell",
 ]
 
