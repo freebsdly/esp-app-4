@@ -106,6 +106,7 @@ use {esp_backtrace, esp_println};
 
 mod ap3216c;
 mod button;
+mod camera;
 mod dht11;
 mod display_log;
 mod i2c;
@@ -116,6 +117,7 @@ mod st7789;
 mod wifi;
 mod xl9555;
 mod qma6100p;
+mod ov5640;
 
 // 创建 esp-idf bootloader 所需的默认应用程序描述符
 // 更多信息请参见: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -275,5 +277,36 @@ async fn main(spawner: Spawner) {
         // 将SPI总线还回，以便其他组件可以使用它
         let spi = display.release_spi();
         guard.replace(spi);
+        
+        // 初始化OV5640摄像头
+        info!("Initializing OV5640 camera...");
+        
+        // 创建OV5640配置 - 使用PSRAM优化配置和VGA分辨率
+        let mut ov5640_config = ov5640::OV5640Config::performance_optimized();
+        ov5640_config = ov5640::OV5640Config::with_power_scheme_a();
+            
+        // 创建OV5640摄像头实例
+        let mut ov5640_camera = ov5640::OV5640Camera::new(ov5640_config);
+        
+        // 初始化摄像头
+        match ov5640_camera.init().await {
+            Ok(()) => {
+                info!("OV5640 camera initialized successfully");
+                
+                // 测试摄像头性能
+                match ov5640_camera.test_performance(5).await {
+                    Ok(performance) => {
+                        info!("Camera performance test: {} FPS, avg frame size: {} bytes", 
+                              performance.fps, performance.avg_size);
+                    }
+                    Err(e) => {
+                        warn!("Camera performance test failed: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Failed to initialize OV5640 camera: {}", e);
+            }
+        }
     }
 }
