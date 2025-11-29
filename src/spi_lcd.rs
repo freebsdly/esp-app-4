@@ -115,7 +115,7 @@ impl<'d> ST7789<'d> {
 
         // 5. 设置内存数据访问控制 - 根据屏幕方向调整
         // 使用BGR颜色顺序，横屏模式
-        self.write_command(CMD_MADCTL, &[MADCTL_MV | MADCTL_BGR])?;
+        self.write_command(CMD_MADCTL, &[MADCTL_BGR])?;
         self.delay.delay_millis(10);
 
         // 6. 设置显示方向和其他参数
@@ -164,7 +164,7 @@ impl<'d> ST7789<'d> {
 
         // 7. 显示反转关闭
         self.write_command(CMD_INVOFF, &[])?;
-        
+
         // 8. 正常显示模式
         self.write_command(CMD_NORON, &[])?;
         self.delay.delay_millis(10);
@@ -180,7 +180,11 @@ impl<'d> ST7789<'d> {
     }
 
     /// Write a command to the display
-    pub(crate) fn write_command(&mut self, cmd: u8, data: &[u8]) -> Result<(), esp_hal::spi::Error> {
+    pub(crate) fn write_command(
+        &mut self,
+        cmd: u8,
+        data: &[u8],
+    ) -> Result<(), esp_hal::spi::Error> {
         self.dc.set_low(); // Command mode
         self.spi.write(&[cmd])?;
 
@@ -259,7 +263,7 @@ impl<'d> ST7789<'d> {
         color: Rgb565,
     ) -> Result<(), esp_hal::spi::Error> {
         // 检查边界，确保不超过屏幕范围
-        if x >= self.width || y >= self.height {
+        if x >= self.width || y >= self.height || w == 0 || h == 0 {
             return Ok(());
         }
 
@@ -280,7 +284,7 @@ impl<'d> ST7789<'d> {
         self.dc.set_high(); // Data mode
 
         let color = RawU16::from(color).into_inner();
-        let count = w as usize * h as usize;
+        let count = (x1 - x + 1) as usize * (y1 - y + 1) as usize;
 
         // Prepare color data with correct byte order for RGB565 format (MSB first)
         // First send high byte (MSB), then low byte (LSB)

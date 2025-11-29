@@ -275,13 +275,13 @@ async fn main(spawner: Spawner) {
     let spi_ref = guard.take().unwrap();
 
     // 创建ST7789驱动实例 (根据实际情况调整分辨率)
-    // 注意: 根据内存信息，ST7789显示屏实际使用的分辨率为240x135
+    // 注意: 根据用户确认，ST7789显示屏实际使用的分辨率为240x320
     let mut display = spi_lcd::ST7789::new(
         spi_ref,
         dc,
         Some(peripherals.GPIO14), // 使用硬件复位
         240,                      // 宽度
-        320,                      // 高度
+        320,                      // 高度 (用户确认的正确分辨率)
     );
 
     // 初始化显示屏
@@ -440,7 +440,7 @@ async fn display_image(
     
     // 简单的图像显示实现
     // 注意：这是一个简化的实现，实际应用中可能需要更好的缩放算法
-    if frame.width == 320 && frame.height == 240 {
+    if frame.width == 240 && frame.height == 320 {
         // 图像尺寸正好适合屏幕旋转后的尺寸
         // 我们需要将RGB565数据写入LCD
         write_frame(display, frame)?;

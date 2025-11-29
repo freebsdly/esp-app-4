@@ -33,7 +33,7 @@ impl<'a, 'd> DisplayLogger<'a, 'd> {
             display,
             text_buffer: String::new(),
             line_height: 12,                   // FONT_6X10 height + 2 pixels padding
-            max_lines: (height / 12) as usize, // For 240x135 display
+            max_lines: (height / 12) as usize, // For 240x320 display
             current_line: 0,
         }
     }
