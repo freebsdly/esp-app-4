@@ -1,3 +1,4 @@
+use defmt::info;
 use crate::i2c;
 use embassy_time::Timer;
 use esp_hal::i2c::master::Error as I2cError;
@@ -241,6 +242,7 @@ pub async fn set_lcd_backlight(state: bool) -> Result<(), I2cError> {
 /// # 参数
 /// * `state` - 引脚状态，true表示高电平，false表示低电平
 pub async fn control_strobe_pin(state: bool) -> Result<(), I2cError> {
+    info!("Setting STROBE pin to: {}", state);
     i2c::with_i2c(|i2c_ref| {
         // 读取当前端口0输出状态
         let mut port0_data = [0u8];

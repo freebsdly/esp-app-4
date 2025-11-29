@@ -392,26 +392,40 @@ async fn main(spawner: Spawner) {
             let mut led_flash = led_flash::LEDFlashController::new();
             
             // 初始化LED闪光灯（只需要初始化一次）
-            if let Err(e) = led_flash.init() {
+            info!("Initializing LED flash...");
+            if let Err(e) = led_flash.init().await {
                 warn!("Failed to initialize LED flash: {}", e);
             } else {
+                info!("LED flash initialized successfully");
+                
                 // 开机自动拍照并使用闪光灯
                 info!("Taking auto photo with flash...");
                 
                 // 触发闪光灯
+                info!("Triggering flash...");
                 if let Err(e) = led_flash.trigger().await {
                     warn!("Failed to trigger flash: {}", e);
+                } else {
+                    info!("Flash triggered successfully");
                 }
 
-                // 等待一小段时间确保闪光灯触发
-                embassy_time::Timer::after_millis(100).await;
+                // 等待一段时间确保闪光灯触发
+                embassy_time::Timer::after_millis(200).await;
             }
 
             // 捕获一帧图像
+            info!("Capturing frame...");
             match ov5640_camera.capture_frame().await {
                 Ok(frame) => {
+                    info!("Frame captured successfully, size: {}x{}", frame.width, frame.height);
+                    
                     // 在SPI LCD上显示图像
-                    let _ = display_image(&mut display, &frame).await;
+                    if let Err(e) = display_image(&mut display, &frame).await {
+                        warn!("Failed to display image: {:?}", e);
+                    } else {
+                        info!("Image displayed successfully");
+                    }
+                    
                     // 释放帧缓冲区内存
                     ov5640_camera.release_frame(frame);
                     
@@ -447,7 +461,7 @@ async fn camera_display_task(
     let mut led_flash = led_flash::LEDFlashController::new();
     
     // 初始化LED闪光灯（只需要初始化一次）
-    if let Err(e) = led_flash.init() {
+    if let Err(e) = led_flash.init().await {
         defmt::warn!("Failed to initialize LED flash: {}", e);
     }
 

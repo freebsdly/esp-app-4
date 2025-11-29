@@ -661,7 +661,7 @@ impl<'a> OV5640Camera<'a> {
         self.apply_power_scheme();
 
         // Apply OV5640-specific settings
-        self.apply_sensor_settings()?;
+        self.apply_sensor_settings().await?;
 
         Ok(())
     }
@@ -727,7 +727,7 @@ impl<'a> OV5640Camera<'a> {
         // Step 5: After t4 ms (typically 20ms), perform SCCB initialization
         info!("Step 5: Waiting, then perform SCCB initialization");
         embassy_time::Timer::after(embassy_time::Duration::from_millis(timing.t4 as u64)).await;
-        self.sccb_initialization()?;
+        self.sccb_initialization().await?;
 
         info!("OV5640 power-up sequence completed");
         Ok(())
@@ -736,18 +736,18 @@ impl<'a> OV5640Camera<'a> {
     /// Perform SCCB initialization
     ///
     /// This function initializes the camera through the SCCB (Serial Camera Control Bus) interface.
-    fn sccb_initialization(&mut self) -> Result<(), &'static str> {
+    async fn sccb_initialization(&mut self) -> Result<(), &'static str> {
         info!("Performing SCCB initialization");
 
         // Following best practices for sensor initialization:
         // 1. Verify the sensor ID
-        self.verify_sensor_id()?;
+        self.verify_sensor_id().await?;
 
         // 2. Send the recommended initialization sequence
-        self.send_initialization_sequence()?;
+        self.send_initialization_sequence().await?;
 
         // 3. Configure default parameters
-        self.configure_default_parameters()?;
+        self.configure_default_parameters().await?;
 
         info!("SCCB initialization completed");
         Ok(())
@@ -786,29 +786,29 @@ impl<'a> OV5640Camera<'a> {
     }
 
     /// Apply OV5640-specific sensor settings
-    fn apply_sensor_settings(&mut self) -> Result<(), &'static str> {
+    async fn apply_sensor_settings(&mut self) -> Result<(), &'static str> {
         info!("Applying OV5640 sensor settings...");
 
         // Apply image stabilization setting
         self.set_image_stabilization(self.settings.image_stabilization);
 
         // Apply banding filter setting
-        self.set_banding_filter_internal(self.settings.banding_filter)?;
+        self.set_banding_filter_internal(self.settings.banding_filter)
+            .await?;
 
         // Apply night mode setting
-        self.set_night_mode_internal(self.settings.night_mode)?;
+        self.set_night_mode_internal(self.settings.night_mode)
+            .await?;
 
         // Apply HDR mode setting
         self.set_hdr_mode(self.settings.hdr_mode);
 
         // Apply mirror and flip settings
-        self.set_mirror_flip_internal(
-            self.settings.horizontal_mirror,
-            self.settings.vertical_flip,
-        )?;
+        self.set_mirror_flip_internal(self.settings.horizontal_mirror, self.settings.vertical_flip)
+            .await?;
 
         // Apply LED mode setting
-        self.set_led_mode_internal(self.settings.led_mode)?;
+        self.set_led_mode_internal(self.settings.led_mode).await?;
 
         info!("OV5640 sensor settings applied");
         Ok(())
@@ -818,12 +818,12 @@ impl<'a> OV5640Camera<'a> {
     ///
     /// This function reads the sensor ID and verifies it matches the expected OV5640 ID.
     /// This is part of the best practices for sensor initialization.
-    fn verify_sensor_id(&mut self) -> Result<(), &'static str> {
+    async fn verify_sensor_id(&mut self) -> Result<(), &'static str> {
         info!("Verifying sensor ID");
 
         // Read the sensor ID from registers 0x300A (high byte) and 0x300B (low byte)
-        let id_high = self.read_i2c(0x300A)?;
-        let id_low = self.read_i2c(0x300B)?;
+        let id_high = self.read_i2c(0x300A).await?;
+        let id_low = self.read_i2c(0x300B).await?;
         let sensor_id = ((id_high as u16) << 8) | (id_low as u16);
 
         if sensor_id != constants::OV5640_ID {
@@ -842,33 +842,33 @@ impl<'a> OV5640Camera<'a> {
     /// Send initialization sequence
     ///
     /// This function sends the recommended initialization sequence to the sensor.
-    fn send_initialization_sequence(&mut self) -> Result<(), &'static str> {
+    async fn send_initialization_sequence(&mut self) -> Result<(), &'static str> {
         info!("Sending initialization sequence");
 
         // System clock configuration
-        self.write_i2c(0x3103, 0x11)?; // System clock source selection
-        self.write_i2c(0x3008, 0x82)?; // Software reset, then wake up
+        self.write_i2c(0x3103, 0x11).await?; // System clock source selection
+        self.write_i2c(0x3008, 0x82).await?; // Software reset, then wake up
 
         // PLL configuration (24MHz input clock)
-        self.write_i2c(0x3035, 0x21)?; // PLL pre-divider
-        self.write_i2c(0x3036, 0x69)?; // PLL multiplier
-        self.write_i2c(0x3037, 0x13)?; // PLL control
+        self.write_i2c(0x3035, 0x21).await?; // PLL pre-divider
+        self.write_i2c(0x3036, 0x69).await?; // PLL multiplier
+        self.write_i2c(0x3037, 0x13).await?; // PLL control
 
         // Image size configuration (VGA as an example)
-        self.write_i2c(0x3808, 0x02)?; // DVP output horizontal size high byte
-        self.write_i2c(0x3809, 0x80)?; // DVP output horizontal size low byte (640)
-        self.write_i2c(0x380a, 0x01)?; // DVP output vertical size high byte
-        self.write_i2c(0x380b, 0xe0)?; // DVP output vertical size low byte (480)
+        self.write_i2c(0x3808, 0x02).await?; // DVP output horizontal size high byte
+        self.write_i2c(0x3809, 0x80).await?; // DVP output horizontal size low byte (640)
+        self.write_i2c(0x380a, 0x01).await?; // DVP output vertical size high byte
+        self.write_i2c(0x380b, 0xe0).await?; // DVP output vertical size low byte (480)
 
         // Timing configuration
-        self.write_i2c(0x380c, 0x07)?; // Horizontal total size high byte
-        self.write_i2c(0x380d, 0x68)?; // Horizontal total size low byte
-        self.write_i2c(0x380e, 0x03)?; // Vertical total size high byte
-        self.write_i2c(0x380f, 0xd8)?; // Vertical total size low byte
+        self.write_i2c(0x380c, 0x07).await?; // Horizontal total size high byte
+        self.write_i2c(0x380d, 0x68).await?; // Horizontal total size low byte
+        self.write_i2c(0x380e, 0x03).await?; // Vertical total size high byte
+        self.write_i2c(0x380f, 0xd8).await?; // Vertical total size low byte
 
         // Image processing function enable
-        self.write_i2c(0x5000, 0xa7)?; // Enable auto exposure, auto white balance, etc.
-        self.write_i2c(0x5001, 0xa3)?; // Enable color processing functions
+        self.write_i2c(0x5000, 0xa7).await?; // Enable auto exposure, auto white balance, etc.
+        self.write_i2c(0x5001, 0xa3).await?; // Enable color processing functions
 
         info!("Initialization sequence sent");
         Ok(())
@@ -876,47 +876,50 @@ impl<'a> OV5640Camera<'a> {
 
     /// Write data to the camera via I2C
     ///
-    /// This is a placeholder function that would interface with the actual I2C hardware.
-    pub fn write_i2c(&mut self, reg: u16, value: u8) -> Result<(), &'static str> {
+    /// This function interfaces with the actual I2C hardware.
+    pub async fn write_i2c(&mut self, reg: u16, value: u8) -> Result<(), &'static str> {
         info!("Writing to register 0x{:04x}: 0x{:02x}", reg, value);
 
-        // In a real implementation, this would write to the camera via I2C
-        // using the SCCB interface (which is compatible with I2C)
-        // Example:
-        // i2c.write(OV5640_SCCB_ADDR, &[reg as u8, value])?;
+        // Use the actual I2C implementation
+        const OV5640_SCCB_ADDR: u8 = 0x78; // OV5640 SCCB write address
 
-        // 临时修复：为了测试目的，我们假设写入成功
+        // Create data packet: [register high byte, register low byte, value]
+        let data = [((reg >> 8) as u8), (reg & 0xFF) as u8, value];
+
+        // Write to the camera via I2C using the SCCB interface
+        crate::i2c::with_i2c(|i2c| i2c.write(OV5640_SCCB_ADDR, &data)).await;
+
         Ok(())
     }
 
     /// Read data from the camera via I2C
     ///
-    /// This is a placeholder function that would interface with the actual I2C hardware.
-    pub fn read_i2c(&mut self, reg: u16) -> Result<u8, &'static str> {
+    /// This function interfaces with the actual I2C hardware.
+    pub async fn read_i2c(&mut self, reg: u16) -> Result<u8, &'static str> {
         info!("Reading from register 0x{:04x}", reg);
 
-        // In a real implementation, this would read from the camera via I2C
-        // using the SCCB interface (which is compatible with I2C)
-        // Example:
-        // let mut value = [0u8];
-        // i2c.write_read(OV5640_SCCB_ADDR, &[reg as u8], &mut value)?;
-        // Ok(value[0])
+        // Use the actual I2C implementation
+        const OV5640_SCCB_ADDR_W: u8 = 0x78; // OV5640 SCCB write address
+        const OV5640_SCCB_ADDR_R: u8 = 0x79; // OV5640 SCCB read address
 
-        // 临时修复：为了测试目的，我们模拟OV5640 ID的读取
-        if reg == 0x300A {
-            Ok(0x56) // OV5640 ID高字节
-        } else if reg == 0x300B {
-            Ok(0x40) // OV5640 ID低字节
-        } else {
-            // For now, return a dummy value
-            Ok(0)
-        }
+        let reg_high = (reg >> 8) as u8;
+        let reg_low = (reg & 0xFF) as u8;
+
+        let mut value = [0u8];
+
+        // First write the register address we want to read
+        crate::i2c::with_i2c(|i2c| i2c.write(OV5640_SCCB_ADDR_W, &[reg_high, reg_low])).await;
+
+        // Then read the value from the camera
+        crate::i2c::with_i2c(|i2c| i2c.write_read(OV5640_SCCB_ADDR_R, &[], &mut value)).await;
+
+        Ok(value[0])
     }
 
     /// Configure default parameters
     ///
     /// This function configures the default parameters for the sensor.
-    fn configure_default_parameters(&mut self) -> Result<(), &'static str> {
+    async fn configure_default_parameters(&mut self) -> Result<(), &'static str> {
         info!("Configuring default parameters");
 
         // Configure based on the current frame size in the base configuration
@@ -928,18 +931,35 @@ impl<'a> OV5640Camera<'a> {
             crate::camera::FrameSize::Qvga => {
                 // QVGA configuration (320x240)
                 info!("Configuring for QVGA (320x240)");
-                self.write_i2c(0x3808, 0x01)?; // DVP output horizontal size high byte
-                self.write_i2c(0x3809, 0x40)?; // DVP output horizontal size low byte (320)
-                self.write_i2c(0x380a, 0x00)?; // DVP output vertical size high byte
-                self.write_i2c(0x380b, 0xf0)?; // DVP output vertical size low byte (240)
+                self.write_i2c(0x3808, 0x01).await?; // DVP output horizontal size high byte
+                self.write_i2c(0x3809, 0x40).await?; // DVP output horizontal size low byte (320)
+                self.write_i2c(0x380a, 0x00).await?; // DVP output vertical size high byte
+                self.write_i2c(0x380b, 0xf0).await?; // DVP output vertical size low byte (240)
             }
+            crate::camera::FrameSize::Cif => {
+                // CIF configuration (352x288)
+                info!("Configuring for CIF (352x288)");
+                self.write_i2c(0x3808, 0x01).await?; // DVP output horizontal size high byte
+                self.write_i2c(0x3809, 0x60).await?; // DVP output horizontal size low byte (352)
+                self.write_i2c(0x380a, 0x01).await?; // DVP output vertical size high byte
+                self.write_i2c(0x380b, 0x20).await?; // DVP output vertical size low byte (288)
+            }
+            crate::camera::FrameSize::Qcif => {
+                // QCIF configuration (176x144)
+                info!("Configuring for QCIF (176x144)");
+                self.write_i2c(0x3808, 0x00).await?; // DVP output horizontal size high byte
+                self.write_i2c(0x3809, 0xb0).await?; // DVP output horizontal size low byte (176)
+                self.write_i2c(0x380a, 0x00).await?; // DVP output vertical size high byte
+                self.write_i2c(0x380b, 0x90).await?; // DVP output vertical size low byte (144)
+            }
+
             crate::camera::FrameSize::Qxga => {
                 // QXGA configuration (2592x1944)
                 info!("Configuring for QXGA (2592x1944)");
-                self.write_i2c(0x3808, 0x0a)?; // DVP output horizontal size high byte
-                self.write_i2c(0x3809, 0x20)?; // DVP output horizontal size low byte (2592)
-                self.write_i2c(0x380a, 0x07)?; // DVP output vertical size high byte
-                self.write_i2c(0x380b, 0x98)?; // DVP output vertical size low byte (1944)
+                self.write_i2c(0x3808, 0x0a).await?; // DVP output horizontal size high byte
+                self.write_i2c(0x3809, 0x20).await?; // DVP output horizontal size low byte (2592)
+                self.write_i2c(0x380a, 0x07).await?; // DVP output vertical size high byte
+                self.write_i2c(0x380b, 0x98).await?; // DVP output vertical size low byte (1944)
             }
             _ => {
                 info!("Using default VGA configuration for unhandled frame size");
@@ -951,21 +971,21 @@ impl<'a> OV5640Camera<'a> {
             crate::camera::PixelFormat::Rgb565 => {
                 info!("Configuring for RGB565 pixel format");
                 // Enable RGB565 format
-                self.write_i2c(0x4300, 0x07)?;
+                self.write_i2c(0x4300, 0x07).await?;
             }
             crate::camera::PixelFormat::Jpeg => {
                 info!("Configuring for JPEG pixel format");
                 // Enable JPEG format
-                self.write_i2c(0x4300, 0x08)?;
+                self.write_i2c(0x4300, 0x08).await?;
             }
             _ => {
                 info!("Using default RGB565 format for unhandled pixel format");
-                self.write_i2c(0x4300, 0x07)?;
+                self.write_i2c(0x4300, 0x07).await?;
             }
         }
 
         // Configure image quality parameters
-        self.configure_image_quality()?;
+        self.configure_image_quality().await?;
 
         info!("Default parameters configured");
         Ok(())
@@ -974,32 +994,32 @@ impl<'a> OV5640Camera<'a> {
     /// Configure image quality parameters
     ///
     /// This function configures various image quality parameters for the OV5640 sensor.
-    pub fn configure_image_quality(&mut self) -> Result<(), &'static str> {
+    pub async fn configure_image_quality(&mut self) -> Result<(), &'static str> {
         info!("Configuring image quality parameters");
 
         // Auto Exposure Control (AEC)
-        self.write_i2c(0x3a00, 0x3c)?; // AEC enable, 50/60Hz auto detection
-        self.write_i2c(0x3a02, 0x03)?; // Max exposure time high byte
-        self.write_i2c(0x3a03, 0xd8)?; // Max exposure time low byte
+        self.write_i2c(0x3a00, 0x3c).await?; // AEC enable, 50/60Hz auto detection
+        self.write_i2c(0x3a02, 0x03).await?; // Max exposure time high byte
+        self.write_i2c(0x3a03, 0xd8).await?; // Max exposure time low byte
 
         // Auto White Balance (AWB)
-        self.write_i2c(0x3406, 0x00)?; // AWB enable
-        self.write_i2c(0x5180, 0xff)?; // AWB gain control
-        self.write_i2c(0x5181, 0xf2)?; // AWB manual control
+        self.write_i2c(0x3406, 0x00).await?; // AWB enable
+        self.write_i2c(0x5180, 0xff).await?; // AWB gain control
+        self.write_i2c(0x5181, 0xf2).await?; // AWB manual control
 
         // Color saturation
-        self.write_i2c(0x5381, 0x1e)?; // Saturation control register 1
-        self.write_i2c(0x5382, 0x5b)?; // Saturation control register 2
-        self.write_i2c(0x5383, 0x08)?; // Saturation control register 3
+        self.write_i2c(0x5381, 0x1e).await?; // Saturation control register 1
+        self.write_i2c(0x5382, 0x5b).await?; // Saturation control register 2
+        self.write_i2c(0x5383, 0x08).await?; // Saturation control register 3
 
         // Gamma correction
-        self.write_i2c(0x5480, 0x01)?; // Gamma enable
-        self.write_i2c(0x5481, 0x08)?; // Gamma value 1
+        self.write_i2c(0x5480, 0x01).await?; // Gamma enable
+        self.write_i2c(0x5481, 0x08).await?; // Gamma value 1
         // ... more gamma register settings would go here
 
         // Lens correction
-        self.write_i2c(0x5800, 0x23)?; // Lens correction coefficient 1
-        self.write_i2c(0x5801, 0x14)?; // Lens correction coefficient 2
+        self.write_i2c(0x5800, 0x23).await?; // Lens correction coefficient 1
+        self.write_i2c(0x5801, 0x14).await?; // Lens correction coefficient 2
         // ... complete lens correction settings would go here
 
         info!("Image quality parameters configured");
@@ -1017,7 +1037,7 @@ impl<'a> OV5640Camera<'a> {
     /// * `y_start` - Y start address (0-1951)
     /// * `x_end` - X end address (0-2632)
     /// * `y_end` - Y end address (0-1951)
-    pub fn configure_isp_input_window(
+    pub async fn configure_isp_input_window(
         &mut self,
         x_start: u16,
         y_start: u16,
@@ -1030,20 +1050,20 @@ impl<'a> OV5640Camera<'a> {
         );
 
         // Set X_ADDR_ST (start X address)
-        self.write_i2c(0x3800, (x_start >> 8) as u8)?; // High byte
-        self.write_i2c(0x3801, x_start as u8)?; // Low byte
+        self.write_i2c(0x3800, (x_start >> 8) as u8).await?; // High byte
+        self.write_i2c(0x3801, x_start as u8).await?; // Low byte
 
         // Set Y_ADDR_ST (start Y address)
-        self.write_i2c(0x3802, (y_start >> 8) as u8)?; // High byte
-        self.write_i2c(0x3803, y_start as u8)?; // Low byte
+        self.write_i2c(0x3802, (y_start >> 8) as u8).await?; // High byte
+        self.write_i2c(0x3803, y_start as u8).await?; // Low byte
 
         // Set X_ADDR_END (end X address)
-        self.write_i2c(0x3804, (x_end >> 8) as u8)?; // High byte
-        self.write_i2c(0x3805, x_end as u8)?; // Low byte
+        self.write_i2c(0x3804, (x_end >> 8) as u8).await?; // High byte
+        self.write_i2c(0x3805, x_end as u8).await?; // Low byte
 
         // Set Y_ADDR_END (end Y address)
-        self.write_i2c(0x3806, (y_end >> 8) as u8)?; // High byte
-        self.write_i2c(0x3807, y_end as u8)?; // Low byte
+        self.write_i2c(0x3806, (y_end >> 8) as u8).await?; // High byte
+        self.write_i2c(0x3807, y_end as u8).await?; // Low byte
 
         info!("ISP input window configured");
         Ok(())
@@ -1058,7 +1078,7 @@ impl<'a> OV5640Camera<'a> {
     /// # Arguments
     /// * `x_offset` - X offset within ISP input window
     /// * `y_offset` - Y offset within ISP input window
-    pub fn configure_pre_scaling_window(
+    pub async fn configure_pre_scaling_window(
         &mut self,
         x_offset: u16,
         y_offset: u16,
@@ -1069,12 +1089,12 @@ impl<'a> OV5640Camera<'a> {
         );
 
         // Set X_OFFSET
-        self.write_i2c(0x3810, (x_offset >> 8) as u8)?; // High byte
-        self.write_i2c(0x3811, x_offset as u8)?; // Low byte
+        self.write_i2c(0x3810, (x_offset >> 8) as u8).await?; // High byte
+        self.write_i2c(0x3811, x_offset as u8).await?; // Low byte
 
         // Set Y_OFFSET
-        self.write_i2c(0x3812, (y_offset >> 8) as u8)?; // High byte
-        self.write_i2c(0x3813, y_offset as u8)?; // Low byte
+        self.write_i2c(0x3812, (y_offset >> 8) as u8).await?; // High byte
+        self.write_i2c(0x3813, y_offset as u8).await?; // Low byte
 
         info!("Pre-scaling window configured");
         Ok(())
@@ -1089,16 +1109,20 @@ impl<'a> OV5640Camera<'a> {
     /// # Arguments
     /// * `width` - Output width in pixels
     /// * `height` - Output height in pixels
-    pub fn configure_output_window(&mut self, width: u16, height: u16) -> Result<(), &'static str> {
+    pub async fn configure_output_window(
+        &mut self,
+        width: u16,
+        height: u16,
+    ) -> Result<(), &'static str> {
         info!("Configuring output window: {}x{}", width, height);
 
         // Set X_OUTPUT_SIZE
-        self.write_i2c(0x3808, (width >> 8) as u8)?; // High byte
-        self.write_i2c(0x3809, width as u8)?; // Low byte
+        self.write_i2c(0x3808, (width >> 8) as u8).await?; // High byte
+        self.write_i2c(0x3809, width as u8).await?; // Low byte
 
         // Set Y_OUTPUT_SIZE
-        self.write_i2c(0x380a, (height >> 8) as u8)?; // High byte
-        self.write_i2c(0x380b, height as u8)?; // Low byte
+        self.write_i2c(0x380a, (height >> 8) as u8).await?; // High byte
+        self.write_i2c(0x380b, height as u8).await?; // Low byte
 
         info!("Output window configured");
         Ok(())
@@ -1120,7 +1144,7 @@ impl<'a> OV5640Camera<'a> {
     /// * `pre_scale_y_offset` - Pre-scaling window Y offset
     /// * `output_width` - Output window width
     /// * `output_height` - Output window height
-    pub fn configure_image_pipeline(
+    pub async fn configure_image_pipeline(
         &mut self,
         input_x_start: u16,
         input_y_start: u16,
@@ -1134,13 +1158,16 @@ impl<'a> OV5640Camera<'a> {
         info!("Configuring complete image pipeline");
 
         // Configure ISP input window
-        self.configure_isp_input_window(input_x_start, input_y_start, input_x_end, input_y_end)?;
+        self.configure_isp_input_window(input_x_start, input_y_start, input_x_end, input_y_end)
+            .await?;
 
         // Configure pre-scaling window
-        self.configure_pre_scaling_window(pre_scale_x_offset, pre_scale_y_offset)?;
+        self.configure_pre_scaling_window(pre_scale_x_offset, pre_scale_y_offset)
+            .await?;
 
         // Configure output window
-        self.configure_output_window(output_width, output_height)?;
+        self.configure_output_window(output_width, output_height)
+            .await?;
 
         info!("Complete image pipeline configured");
         Ok(())
@@ -1171,11 +1198,11 @@ impl<'a> OV5640Camera<'a> {
     }
 
     /// Set LED mode
-    fn set_led_mode_internal(&mut self, mode: LEDMode) -> Result<(), &'static str> {
+    async fn set_led_mode_internal(&mut self, mode: LEDMode) -> Result<(), &'static str> {
         info!("Setting LED mode to {:?}", mode);
 
         // Apply LED mode setting
-        self.set_led_mode(mode)?;
+        self.set_led_mode(mode).await?;
 
         Ok(())
     }
@@ -1271,12 +1298,12 @@ impl OV5640Camera<'_> {
         self.download_af_firmware().await?;
 
         // Enable MCU clock
-        self.write_i2c(0x3000, 0x20)?; // Set bit[5]=1 to enable MCU clock
+        self.write_i2c(0x3000, 0x20).await?; // Set bit[5]=1 to enable MCU clock
 
         // Wait for firmware initialization to complete
         let mut timeout = 1000; // 1 second timeout
         while timeout > 0 {
-            let status = self.read_i2c(0x3029)?;
+            let status = self.read_i2c(0x3029).await?;
             if status == 0x7F {
                 // Firmware downloaded but not executed
                 break;
@@ -1330,12 +1357,12 @@ impl OV5640Camera<'_> {
 
         // Step 1: Send single focus command
         // The microcontroller will automatically clear CMD_MAIN (0x3022) register after receiving the command
-        self.write_i2c(0x3022, 0x03)?; // Start single focus
+        self.write_i2c(0x3022, 0x03).await?; // Start single focus
 
         // Step 2: Wait for focus completion (polling status register)
         let mut timeout = 1000; // 1 second timeout
         while timeout > 0 {
-            let status = self.read_i2c(0x3029)?;
+            let status = self.read_i2c(0x3029).await?;
             if status == 0x10 {
                 // Focus completion flag
                 break;
@@ -1351,12 +1378,12 @@ impl OV5640Camera<'_> {
 
         // Step 3: Pause auto focus (maintain lens position)
         // This step is optional as single autofocus stops automatically after completion
-        self.write_i2c(0x3022, 0x06)?; // Pause auto focus
+        self.write_i2c(0x3022, 0x06).await?; // Pause auto focus
 
         // Wait for command acknowledgment
         timeout = 1000; // 1 second timeout
         while timeout > 0 {
-            let ack = self.read_i2c(0x3023)?;
+            let ack = self.read_i2c(0x3023).await?;
             if ack == 0x00 {
                 // Command completed, MCU cleared CMD_ACK
                 break;
@@ -1390,12 +1417,12 @@ impl OV5640Camera<'_> {
         info!("Starting continuous auto focus");
 
         // Step 1: Release motor to initial position (focus at infinity)
-        self.write_i2c(0x3022, 0x08)?; // Release motor to initial position
+        self.write_i2c(0x3022, 0x08).await?; // Release motor to initial position
 
         // Wait for command acknowledgment
         let mut timeout = 1000; // 1 second timeout
         while timeout > 0 {
-            let ack = self.read_i2c(0x3023)?;
+            let ack = self.read_i2c(0x3023).await?;
             if ack == 0x00 {
                 // Command completed, MCU cleared CMD_ACK
                 break;
@@ -1410,12 +1437,12 @@ impl OV5640Camera<'_> {
         }
 
         // Step 2: Start continuous autofocus
-        self.write_i2c(0x3022, 0x04)?; // Start continuous autofocus
+        self.write_i2c(0x3022, 0x04).await?; // Start continuous autofocus
 
         // Step 3: Wait for command completion
         timeout = 1000; // 1 second timeout
         while timeout > 0 {
-            let ack = self.read_i2c(0x3023)?;
+            let ack = self.read_i2c(0x3023).await?;
             if ack == 0x00 {
                 // Command completed, MCU cleared CMD_ACK
                 break;
@@ -1444,12 +1471,12 @@ impl OV5640Camera<'_> {
         info!("Stopping continuous auto focus");
 
         // Send pause command
-        self.write_i2c(0x3022, 0x06)?; // Pause auto focus
+        self.write_i2c(0x3022, 0x06).await?; // Pause auto focus
 
         // Wait for command acknowledgment
         let mut timeout = 1000; // 1 second timeout
         while timeout > 0 {
-            let ack = self.read_i2c(0x3023)?;
+            let ack = self.read_i2c(0x3023).await?;
             if ack == 0x00 {
                 // Command completed, MCU cleared CMD_ACK
                 break;
@@ -1474,15 +1501,15 @@ impl OV5640Camera<'_> {
     pub async fn af_release(&mut self) -> Result<(), &'static str> {
         info!("Releasing auto focus");
 
-        self.write_i2c(0x3022, 0x08)?; // Release focus position
+        self.write_i2c(0x3022, 0x08).await?; // Release focus position
 
         // Wait for command acknowledgment
         let mut timeout = 1000; // 1 second timeout
         while timeout > 0 {
-            let ack = self.read_i2c(0x3023)?;
+            let ack = self.read_i2c(0x3023).await?;
             if ack == 0x00 {
                 // Command completed, MCU cleared CMD_ACK
-                let status = self.read_i2c(0x3029)?;
+                let status = self.read_i2c(0x3029).await?;
                 if status == 0x70 {
                     // Released to initial state
                     break;
@@ -1512,14 +1539,14 @@ impl OV5640Camera<'_> {
         info!("Setting focus area to ({}, {})", x, y);
 
         // Send set focus area command
-        self.write_i2c(0x3022, 0x12)?; // Set focus area command
-        self.write_i2c(0x3024, x)?; // X coordinate
-        self.write_i2c(0x3025, y)?; // Y coordinate
+        self.write_i2c(0x3022, 0x12).await?; // Set focus area command
+        self.write_i2c(0x3024, x).await?; // X coordinate
+        self.write_i2c(0x3025, y).await?; // Y coordinate
 
         // Wait for command acknowledgment
         let mut timeout = 1000; // 1 second timeout
         while timeout > 0 {
-            let ack = self.read_i2c(0x3023)?;
+            let ack = self.read_i2c(0x3023).await?;
             if ack == 0x00 {
                 // Command completed, MCU cleared CMD_ACK
                 break;
@@ -1544,40 +1571,43 @@ impl OV5640Camera<'_> {
     ///
     /// # Arguments
     /// * `mode` - The banding filter mode to set
-    fn set_banding_filter_internal(&mut self, mode: BandingFilterMode) -> Result<(), &'static str> {
+    async fn set_banding_filter_internal(
+        &mut self,
+        mode: BandingFilterMode,
+    ) -> Result<(), &'static str> {
         info!("Setting banding filter mode to: {:?}", mode as u8);
 
-        let mut temp = self.read_i2c(0x3a00)?;
+        let mut temp = self.read_i2c(0x3a00).await?;
 
         match mode {
             BandingFilterMode::Off => {
                 // Disable
                 temp &= 0xDF; // Clear bit[5]
-                self.write_i2c(0x3c01, 0x00)?; // Auto mode
+                self.write_i2c(0x3c01, 0x00).await?; // Auto mode
             }
 
             BandingFilterMode::Manual50Hz => {
                 // 50Hz manual
-                self.write_i2c(0x3c00, 0x04)?; // Set to 50Hz
-                self.write_i2c(0x3c01, 0x80)?; // Manual mode
+                self.write_i2c(0x3c00, 0x04).await?; // Set to 50Hz
+                self.write_i2c(0x3c01, 0x80).await?; // Manual mode
                 temp |= 0x20; // Set bit[5]
             }
 
             BandingFilterMode::Manual60Hz => {
                 // 60Hz manual
-                self.write_i2c(0x3c00, 0x00)?; // Set to 60Hz
-                self.write_i2c(0x3c01, 0x80)?; // Manual mode
+                self.write_i2c(0x3c00, 0x00).await?; // Set to 60Hz
+                self.write_i2c(0x3c01, 0x80).await?; // Manual mode
                 temp |= 0x20; // Set bit[5]
             }
 
             BandingFilterMode::Auto => {
                 // Auto detection
-                self.write_i2c(0x3c01, 0x00)?; // Auto mode
+                self.write_i2c(0x3c01, 0x00).await?; // Auto mode
                 temp |= 0x20; // Set bit[5]
             }
         }
 
-        self.write_i2c(0x3a00, temp)?;
+        self.write_i2c(0x3a00, temp).await?;
 
         info!("Banding filter configured");
         Ok(())
@@ -1589,25 +1619,25 @@ impl OV5640Camera<'_> {
     ///
     /// # Arguments
     /// * `enable` - true to enable night mode, false to disable it
-    fn set_night_mode_internal(&mut self, enable: bool) -> Result<(), &'static str> {
+    async fn set_night_mode_internal(&mut self, enable: bool) -> Result<(), &'static str> {
         info!("Setting night mode to: {}", enable);
 
-        let mut temp = self.read_i2c(0x3a00)?;
+        let mut temp = self.read_i2c(0x3a00).await?;
 
         if enable {
             // Enable night mode
             temp |= 0x04; // Set bit[2]=1
-            self.write_i2c(0x3a00, temp)?;
+            self.write_i2c(0x3a00, temp).await?;
 
             // Configure long exposure time (up to 8 frames)
-            self.write_i2c(0x3a02, 0x07)?; // 60Hz max exposure
-            self.write_i2c(0x3a03, 0xd8)?;
-            self.write_i2c(0x3a14, 0x07)?; // 50Hz max exposure  
-            self.write_i2c(0x3a15, 0xd8)?;
+            self.write_i2c(0x3a02, 0x07).await?; // 60Hz max exposure
+            self.write_i2c(0x3a03, 0xd8).await?;
+            self.write_i2c(0x3a14, 0x07).await?; // 50Hz max exposure
+            self.write_i2c(0x3a15, 0xd8).await?;
         } else {
             // Disable night mode
             temp &= 0xFB; // Clear bit[2]
-            self.write_i2c(0x3a00, temp)?;
+            self.write_i2c(0x3a00, temp).await?;
         }
 
         info!("Night mode configured");
@@ -1621,11 +1651,15 @@ impl OV5640Camera<'_> {
     /// # Arguments
     /// * `mirror` - true to enable horizontal mirror, false to disable
     /// * `flip` - true to enable vertical flip, false to disable
-    fn set_mirror_flip_internal(&mut self, mirror: bool, flip: bool) -> Result<(), &'static str> {
+    async fn set_mirror_flip_internal(
+        &mut self,
+        mirror: bool,
+        flip: bool,
+    ) -> Result<(), &'static str> {
         info!("Setting mirror: {}, flip: {}", mirror, flip);
 
-        let mut reg3820 = self.read_i2c(0x3820)?;
-        let mut reg3821 = self.read_i2c(0x3821)?;
+        let mut reg3820 = self.read_i2c(0x3820).await?;
+        let mut reg3821 = self.read_i2c(0x3821).await?;
 
         // Configure flip (0x3820 register)
         if flip {
@@ -1641,8 +1675,8 @@ impl OV5640Camera<'_> {
             reg3821 &= 0xF9; // Clear bit[2:1] to disable mirror
         }
 
-        self.write_i2c(0x3820, reg3820)?;
-        self.write_i2c(0x3821, reg3821)?;
+        self.write_i2c(0x3820, reg3820).await?;
+        self.write_i2c(0x3821, reg3821).await?;
 
         info!("Mirror and flip configured");
         Ok(())
@@ -1793,45 +1827,49 @@ pub enum StrobeMode {
 
 impl OV5640Camera<'_> {
     /// 初始化LED闪光灯功能
-    pub fn init_led_flash(&mut self) -> Result<(), &'static str> {
+    pub async fn init_led_flash(&mut self) -> Result<(), &'static str> {
         info!("Initializing LED flash functionality");
 
         // 配置STROBE引脚相关的寄存器
         // 根据用户提供的详细配置信息:
-        self.write_i2c(0x300A, 0x01)?; // 启用STROBE功能
-        self.write_i2c(0x3A20, 0x84)?; // STROBE选项配置
-        self.write_i2c(0x3A21, 0x78)?; // 插入帧数控制
-        self.write_i2c(0x3A08, 0x01)?; // LED模式曝光值添加
-        self.write_i2c(0x3A1D, 0x18)?; // LED模式行数添加（低字节）
-        self.write_i2c(0x3A1E, 0x68)?; // 稳定范围下限
-        self.write_i2c(0x3A1F, 0x40)?; // 快速区域下限
-        self.write_i2c(0x3A00, 0x58)?; // AEC系统控制（包含LED设置）
+        self.write_i2c(0x300A, 0x01).await?; // 启用STROBE功能
+        self.write_i2c(0x3A20, 0x84).await?; // STROBE选项配置
+        self.write_i2c(0x3A21, 0x78).await?; // 插入帧数控制
+        self.write_i2c(0x3A08, 0x01).await?; // LED模式曝光值添加
+        self.write_i2c(0x3A1D, 0x18).await?; // LED模式行数添加（低字节）
+        self.write_i2c(0x3A1E, 0x68).await?; // 稳定范围下限
+        self.write_i2c(0x3A1F, 0x40).await?; // 快速区域下限
+        self.write_i2c(0x3A00, 0x58).await?; // AEC系统控制（包含LED设置）
 
         // 设置默认LED规格
-        self.set_led_specification(LEDSpecification::default())?;
+        self.set_led_specification(LEDSpecification::default())
+            .await?;
 
         info!("LED flash functionality initialized");
         Ok(())
     }
 
     /// 设置LED闪光时的曝光补偿
-    pub fn set_led_exposure_compensation(&mut self) -> Result<(), &'static str> {
+    pub async fn set_led_exposure_compensation(&mut self) -> Result<(), &'static str> {
         info!("Setting LED exposure compensation");
 
         // LED闪光时的曝光补偿
-        self.write_i2c(0x3A08, 0x01)?; // 开启LED模式曝光补偿
-        self.write_i2c(0x3A1D, 0x18)?; // LED添加行数[7:0]
-        self.write_i2c(0x3A02, 0x03)?; // 60Hz最大曝光
-        self.write_i2c(0x3A03, 0xD8)?; // 60Hz最大曝光
-        self.write_i2c(0x3A14, 0x02)?; // 50Hz最大曝光  
-        self.write_i2c(0x3A15, 0x50)?; // 50Hz最大曝光
+        self.write_i2c(0x3A08, 0x01).await?; // 开启LED模式曝光补偿
+        self.write_i2c(0x3A1D, 0x18).await?; // LED添加行数[7:0]
+        self.write_i2c(0x3A02, 0x03).await?; // 60Hz最大曝光
+        self.write_i2c(0x3A03, 0xD8).await?; // 60Hz最大曝光
+        self.write_i2c(0x3A14, 0x02).await?; // 50Hz最大曝光  
+        self.write_i2c(0x3A15, 0x50).await?; // 50Hz最大曝光
 
         info!("LED exposure compensation set");
         Ok(())
     }
 
     /// 设置LED规格参数
-    pub fn set_led_specification(&mut self, spec: LEDSpecification) -> Result<(), &'static str> {
+    pub async fn set_led_specification(
+        &mut self,
+        spec: LEDSpecification,
+    ) -> Result<(), &'static str> {
         info!("Setting LED specification: {:?}", spec);
 
         // 根据规格设置相关寄存器
@@ -1839,42 +1877,96 @@ impl OV5640Camera<'_> {
 
         // 设置最大电流相关参数
         let current_reg_val = (spec.max_current / 10) as u8; // 转换为寄存器值
-        self.write_i2c(0x3019, current_reg_val)?;
+        self.write_i2c(0x3019, current_reg_val).await?;
 
         // 设置色温相关参数
         let temp_reg_val = (spec.color_temperature / 1000) as u8; // 转换为寄存器值
-        self.write_i2c(0x301A, temp_reg_val)?;
+        self.write_i2c(0x301A, temp_reg_val).await?;
 
         Ok(())
     }
 
     /// 设置LED模式
-    pub fn set_led_mode(&mut self, mode: LEDMode) -> Result<(), &'static str> {
+    pub async fn set_led_mode(&mut self, mode: LEDMode) -> Result<(), &'static str> {
         info!("Setting LED mode to: {:?}", mode);
 
         match mode {
             LEDMode::FlashLED => {
                 // 配置为闪光灯模式
-                self.write_i2c(0x301B, 0x01)?; // 单次闪光模式
-                self.write_i2c(0x301C, 0x01)?; // 使能闪光灯
+                self.write_i2c(0x301B, 0x01).await?; // 单次闪光模式
+                self.write_i2c(0x301C, 0x01).await?; // 使能闪光灯
             }
             LEDMode::TorchLED => {
                 // 配置为手电筒模式
-                self.write_i2c(0x301B, 0x02)?; // 持续照明模式
-                self.write_i2c(0x301C, 0x01)?; // 使能LED
+                self.write_i2c(0x301B, 0x02).await?; // 持续照明模式
+                self.write_i2c(0x301C, 0x01).await?; // 使能LED
             }
             LEDMode::AutoFlash => {
                 // 配置为自动闪光模式
-                self.write_i2c(0x301B, 0x03)?; // 自动闪光模式
-                self.write_i2c(0x301C, 0x01)?; // 使能自动闪光
+                self.write_i2c(0x301B, 0x03).await?; // 自动闪光模式
+                self.write_i2c(0x301C, 0x01).await?; // 使能自动闪光
             }
             LEDMode::RedEyeReduction => {
                 // 配置为红眼消除模式
-                self.write_i2c(0x301B, 0x04)?; // 红眼消除模式
-                self.write_i2c(0x301C, 0x01)?; // 使能红眼消除
+                self.write_i2c(0x301B, 0x04).await?; // 红眼消除模式
+                self.write_i2c(0x301C, 0x01).await?; // 使能红眼消除
             }
         }
 
         Ok(())
+    }
+
+    /// 设置LED闪光强度
+    pub async fn set_led_intensity(&mut self, intensity: u8) -> Result<(), &'static str> {
+        info!("Setting LED intensity to: {}%", intensity);
+
+        // 限制强度在0-100范围内
+        let intensity = intensity.min(100);
+
+        // 将强度转换为寄存器值 (0-255)
+        let reg_value = (intensity as u16 * 255 / 100) as u8;
+
+        // 设置LED强度寄存器
+        self.write_i2c(0x301D, reg_value).await?;
+
+        Ok(())
+    }
+
+    /// 触发LED闪光
+    pub async fn trigger_led_flash(&mut self) -> Result<(), &'static str> {
+        info!("Triggering LED flash");
+
+        // 触发单次闪光
+        self.write_i2c(0x301E, 0x01).await?;
+
+        Ok(())
+    }
+
+    /// 启用手电筒模式
+    pub async fn enable_torch_mode(&mut self, enable: bool) -> Result<(), &'static str> {
+        info!("Setting torch mode to: {}", enable);
+
+        if enable {
+            // 启用手电筒模式
+            self.write_i2c(0x301F, 0x01).await?;
+        } else {
+            // 禁用手电筒模式
+            self.write_i2c(0x301F, 0x00).await?;
+        }
+
+        Ok(())
+    }
+
+    /// 获取LED状态
+    pub async fn get_led_status(&mut self) -> Result<u8, &'static str> {
+        // 读取LED状态寄存器
+        let status = self.read_i2c(0x3020).await?;
+        Ok(status)
+    }
+
+    /// 获取对摄像头I2C接口的可变引用
+    /// 用于外部模块直接访问摄像头寄存器
+    pub fn get_i2c_mut(&mut self) -> &mut Self {
+        self
     }
 }

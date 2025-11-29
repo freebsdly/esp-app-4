@@ -211,9 +211,9 @@ pub struct FlashTiming {
 impl Default for FlashTiming {
     fn default() -> Self {
         Self {
-            preflash_duration: 2,
-            mainflash_delay: 12,
-            mainflash_duration: 80,
+            preflash_duration: 5,    // 增加到5ms确保可见
+            mainflash_delay: 15,     // 增加到15ms
+            mainflash_duration: 100, // 增加到100ms确保可见
             recharge_time: 300,
         }
     }
@@ -299,6 +299,17 @@ impl LEDFlashController {
         ctrl
     }
 
+    /// 连接OV5640摄像头以进行寄存器访问
+    /// 注意：这是一个简化实现，实际应用中应该传递摄像头引用
+    pub async fn attach_to_camera(&mut self, _camera: &mut crate::ov5640::OV5640Camera<'_>) -> Result<(), &'static str> {
+        info!("Attaching LED flash controller to OV5640 camera");
+        
+        // 在实际实现中，这里会建立与摄像头的连接以访问寄存器
+        // 例如：self.camera = Some(camera);
+        
+        Ok(())
+    }
+
     /// Set LED mode
     pub fn set_mode(&mut self, mode: LEDMode) {
         info!("Setting LED mode to {:?}", mode);
@@ -340,29 +351,29 @@ impl LEDFlashController {
         }
     }
 
-    /// Set LED specification
+    /// 设置LED规格参数
     pub fn set_specification(&mut self, spec: LEDSpecification) {
         info!("Setting LED specification: {:?}", spec);
         self.spec = spec;
     }
 
-    /// Get LED specification
+    /// 获取LED规格参数
     pub fn specification(&self) -> LEDSpecification {
         self.spec
     }
 
-    /// Set flash timing parameters
+    /// 设置闪光时序参数
     pub fn set_timing(&mut self, timing: FlashTiming) {
         info!("Setting flash timing: {:?}", timing);
         self.timing = timing;
     }
 
-    /// Get flash timing parameters
+    /// 获取闪光时序参数
     pub fn timing(&self) -> FlashTiming {
         self.timing
     }
 
-    /// Set flash intensity (0-100%)
+    /// 设置闪光强度 (0-100%)
     pub fn set_flash_intensity(&mut self, intensity: u8) {
         self.led_ctrl.flash_intensity = intensity.min(100);
         info!(
@@ -371,7 +382,7 @@ impl LEDFlashController {
         );
     }
 
-    /// Set torch intensity (0-100%)
+    /// 设置手电筒强度 (0-100%)
     pub fn set_torch_intensity(&mut self, intensity: u8) {
         self.led_ctrl.torch_intensity = intensity.min(100);
         info!(
@@ -380,52 +391,51 @@ impl LEDFlashController {
         );
     }
 
-    /// Set auto flash algorithm parameters
+    /// 设置自动闪光算法参数
     pub fn set_auto_flash_algorithm(&mut self, algo: AutoFlashAlgorithm) {
         self.auto_flash_algo = algo;
     }
 
-    /// Get auto flash algorithm
+    /// 获取自动闪光算法
     pub fn auto_flash_algorithm(&self) -> &AutoFlashAlgorithm {
         &self.auto_flash_algo
     }
 
-    /// Initialize LED flash functionality
-    pub fn init(&mut self) -> Result<(), &'static str> {
+    /// 初始化LED闪光灯功能
+    pub async fn init(&mut self) -> Result<(), &'static str> {
         info!("Initializing LED flash functionality");
 
         // 配置STROBE引脚相关的寄存器
-        // 根据用户提供的详细配置信息:
-        self.write_i2c(0x300A, 0x01)?;     // 启用STROBE功能
-        self.write_i2c(0x3A20, 0x84)?;     // STROBE选项配置
-        self.write_i2c(0x3A21, 0x78)?;     // 插入帧数控制
-        self.write_i2c(0x3A08, 0x01)?;     // LED模式曝光值添加
-        self.write_i2c(0x3A1D, 0x18)?;     // LED模式行数添加（低字节）
-        self.write_i2c(0x3A1E, 0x68)?;     // 稳定范围下限
-        self.write_i2c(0x3A1F, 0x40)?;     // 快速区域下限
-        self.write_i2c(0x3A00, 0x58)?;     // AEC系统控制（包含LED设置）
+        self.write_i2c(0x300A, 0x01).await?;     // 启用STROBE功能
+        self.write_i2c(0x3A20, 0x84).await?;     // STROBE选项配置
+        self.write_i2c(0x3A21, 0x78).await?;     // 插入帧数控制
+        self.write_i2c(0x3A08, 0x01).await?;     // LED模式曝光值添加
+        self.write_i2c(0x3A1D, 0x18).await?;     // LED模式行数添加（低字节）
+        self.write_i2c(0x3A1E, 0x68).await?;     // 稳定范围下限
+        self.write_i2c(0x3A1F, 0x40).await?;     // 快速区域下限
+        self.write_i2c(0x3A00, 0x58).await?;     // AEC系统控制（包含LED设置）
 
         info!("LED flash functionality initialized");
         Ok(())
     }
 
     /// 设置LED闪光时的曝光补偿
-    pub fn set_led_exposure_compensation(&mut self) -> Result<(), &'static str> {
+    pub async fn set_led_exposure_compensation(&mut self) -> Result<(), &'static str> {
         info!("Setting LED exposure compensation");
 
-        self.write_i2c(0x3A08, 0x01)?; // 开启LED模式曝光补偿
-        self.write_i2c(0x3A1D, 0x18)?; // LED添加行数[7:0]
-        self.write_i2c(0x3A02, 0x03)?; // 60Hz最大曝光
-        self.write_i2c(0x3A03, 0xD8)?; // 60Hz最大曝光
-        self.write_i2c(0x3A14, 0x02)?; // 50Hz最大曝光
-        self.write_i2c(0x3A15, 0x50)?; // 50Hz最大曝光
+        self.write_i2c(0x3A08, 0x01).await?;     // 开启LED模式曝光补偿
+        self.write_i2c(0x3A1D, 0x18).await?;     // LED添加行数[7:0]
+        self.write_i2c(0x3A02, 0x03).await?;     // 60Hz最大曝光
+        self.write_i2c(0x3A03, 0xD8).await?;     // 60Hz最大曝光
+        self.write_i2c(0x3A14, 0x02).await?;     // 50Hz最大曝光
+        self.write_i2c(0x3A15, 0x50).await?;     // 50Hz最大曝光
 
         info!("LED exposure compensation set");
         Ok(())
     }
 
     /// 设置闪光灯模式
-    pub fn set_flash_mode(&mut self, mode: StrobeMode, intensity: u8) -> Result<(), &'static str> {
+    pub async fn set_flash_mode(&mut self, mode: StrobeMode, intensity: u8) -> Result<(), &'static str> {
         self.led_ctrl.strobe_mode = mode;
         self.led_ctrl.flash_intensity = intensity.min(100);
 
@@ -442,7 +452,7 @@ impl LEDFlashController {
             StrobeMode::Disable => 0x00,
         };
 
-        self.write_i2c(0x300A, strobe_reg)?;
+        self.write_i2c(0x300A, strobe_reg).await?;
 
         // 设置LED强度（在实际硬件中会转换为PWM占空比）
         info!("Flash intensity set to {}%", self.led_ctrl.flash_intensity);
@@ -451,7 +461,7 @@ impl LEDFlashController {
     }
 
     /// 手电筒模式控制
-    pub fn set_torch_mode(&mut self, enable: bool, intensity: u8) -> Result<(), &'static str> {
+    pub async fn set_torch_mode(&mut self, enable: bool, intensity: u8) -> Result<(), &'static str> {
         self.led_ctrl.torch_enabled = enable;
         self.led_ctrl.torch_intensity = intensity.min(100);
 
@@ -501,10 +511,10 @@ impl LEDFlashController {
         let duration_ms = duration_ms.min(1000);
 
         // 执行闪光
-        self.set_flash_mode(StrobeMode::LedMode, intensity)?;
+        self.set_flash_mode(StrobeMode::LedMode, intensity).await?;
         self.control_strobe_pin(true).await?;
         Timer::after(Duration::from_millis(duration_ms as u64)).await;
-        self.set_flash_mode(StrobeMode::Disable, 0)?;
+        self.set_flash_mode(StrobeMode::Disable, 0).await?;
         self.control_strobe_pin(false).await?;
 
         // 更新计数和时间
@@ -533,15 +543,12 @@ impl LEDFlashController {
     pub async fn trigger(&mut self) -> Result<(), &'static str> {
         info!("Triggering complete LED flash sequence");
 
-        // 1. 首先确保OV5640内部寄存器已正确配置
-        self.init()?;
-
-        // 2. 根据模式执行不同的闪光序列
+        // 触发闪光灯，不需要每次都重新初始化
         match self.mode() {
             LEDMode::RedEyeReduction => {
                 // 红眼消除模式需要预闪+主闪的双脉冲序列
                 info!("Triggering red-eye reduction flash sequence");
-
+                
                 // 预闪
                 self.control_strobe_pin(true).await?;
                 Timer::after(Duration::from_millis(self.timing.preflash_duration as u64)).await;
@@ -592,38 +599,65 @@ impl LEDFlashController {
             .map_err(|_| "Failed to control STROBE pin")
     }
 
+    /// 关闭LED闪光灯
+    pub async fn disable(&mut self) -> Result<(), &'static str> {
+        info!("Disabling LED flash");
+
+        // 禁用闪光灯功能
+        self.write_i2c(0x300A, StrobeMode::Disable as u8).await?; // 禁用STROBE
+
+        Ok(())
+    }
+
     /// 写入OV5640寄存器
-    fn write_i2c(&mut self, reg: u16, value: u8) -> Result<(), &'static str> {
+    async fn write_i2c(&mut self, reg: u16, value: u8) -> Result<(), &'static str> {
         info!("Writing to register 0x{:04x}: 0x{:02x}", reg, value);
-
-        // TODO: 实现实际的I2C写入操作
-        // 这里需要访问OV5640摄像头的I2C接口
-        // 暂时返回Ok以避免编译错误
-
+        
+        // 使用SCCB接口写入OV5640寄存器
+        // OV5640的SCCB地址通常是0x78 (写)
+        const OV5640_SCCB_ADDR: u8 = 0x78;
+        
+        // 通过I2C总线写入数据 [寄存器高字节, 寄存器低字节, 值]
+        let data = [((reg >> 8) as u8), (reg & 0xFF) as u8, value];
+        
+        // 使用现有的I2C接口
+        if let Err(_) = crate::i2c::with_i2c(|i2c| {
+            i2c.write(OV5640_SCCB_ADDR, &data)
+        }).await {
+            return Err("Failed to write to OV5640 register");
+        }
+        
         Ok(())
     }
 
     /// 读取OV5640寄存器
-    fn read_i2c(&mut self, reg: u16) -> Result<u8, &'static str> {
+    async fn read_i2c(&mut self, reg: u16) -> Result<u8, &'static str> {
         info!("Reading from register 0x{:04x}", reg);
-
-        // TODO: 实现实际的I2C读取操作
-        // 这里需要访问OV5640摄像头的I2C接口
-        // 暂时返回0以避免编译错误
-
-        Ok(0)
-    }
-
-    /// 关闭LED闪光灯
-    pub fn disable(&mut self) -> Result<(), &'static str> {
-        info!("Disabling LED flash");
-
-        // 禁用闪光灯功能
-        // TODO: 根据OV5640数据手册禁用相关寄存器
-        // 示例代码如下：
-        // self.write_i2c(0x300A, StrobeMode::Disable as u8)?; // 禁用STROBE
-
-        Ok(())
+        
+        // 使用SCCB接口读取OV5640寄存器
+        // OV5640的SCCB地址通常是0x78 (写) 或 0x79 (读)
+        const OV5640_SCCB_ADDR_W: u8 = 0x78;
+        const OV5640_SCCB_ADDR_R: u8 = 0x79;
+        
+        let reg_high = (reg >> 8) as u8;
+        let reg_low = (reg & 0xFF) as u8;
+        
+        // 首先写入要读取的寄存器地址
+        if let Err(_) = crate::i2c::with_i2c(|i2c| {
+            i2c.write(OV5640_SCCB_ADDR_W, &[reg_high, reg_low])
+        }).await {
+            return Err("Failed to set register address for reading");
+        }
+        
+        // 然后读取寄存器的值
+        let mut value = [0u8];
+        if let Err(_) = crate::i2c::with_i2c(|i2c| {
+            i2c.write_read(OV5640_SCCB_ADDR_R, &[], &mut value)
+        }).await {
+            return Err("Failed to read from OV5640 register");
+        }
+        
+        Ok(value[0])
     }
 }
 
