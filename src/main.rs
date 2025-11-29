@@ -124,6 +124,7 @@ mod spi;
 mod spi_lcd;
 mod wifi;
 mod xl9555;
+mod led_flash;
 
 // 创建 esp-idf bootloader 所需的默认应用程序描述符
 // 更多信息请参见: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -423,7 +424,7 @@ async fn camera_display_task(
         }
 
         // 等待一小段时间再捕获下一帧
-        embassy_time::Timer::after_millis(50).await;
+        embassy_time::Timer::after_secs(10).await;
     }
 }
 

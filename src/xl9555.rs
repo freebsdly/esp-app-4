@@ -234,6 +234,31 @@ pub async fn set_lcd_backlight(state: bool) -> Result<(), I2cError> {
     i2c::with_i2c(|i2c_ref| set_spi_lcd_power_state(i2c_ref, state)).await
 }
 
+/// 控制STROBE引脚（用于OV5640闪光灯）
+/// 
+/// STROBE引脚连接到XL9555的P0.6 (GBC_LED_IO)，用于控制OV5640的LED闪光灯
+/// 
+/// # 参数
+/// * `state` - 引脚状态，true表示高电平，false表示低电平
+pub async fn control_strobe_pin(state: bool) -> Result<(), I2cError> {
+    i2c::with_i2c(|i2c_ref| {
+        // 读取当前端口0输出状态
+        let mut port0_data = [0u8];
+        i2c_ref.write_read(XL9555_ADDR, &[registers::OUTPUT_PORT_0], &mut port0_data)?;
+        
+        // 根据状态设置STROBE引脚 (P0.6)
+        let new_port0_data = if state {
+            port0_data[0] | (io_bits::GBC_LED_IO >> 8) as u8 // 设置P0.6为高电平
+        } else {
+            port0_data[0] & !((io_bits::GBC_LED_IO >> 8) as u8) // 设置P0.6为低电平
+        };
+
+        // 写回端口0输出
+        i2c_ref.write(XL9555_ADDR, &[registers::OUTPUT_PORT_0, new_port0_data])
+    })
+    .await
+}
+
 /// 初始化ATK-MD0240模块
 /// 执行硬件复位序列：RST引脚拉低至少10微秒，然后拉高并延时120毫秒等待复位完成
 pub async fn init_atk_md0240() -> Result<(), I2cError> {
