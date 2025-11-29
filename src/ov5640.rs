@@ -1086,6 +1086,13 @@ impl<'a> OV5640Camera<'a> {
         self.camera.test_performance(times).await
     }
 
+    /// Release a captured frame
+    ///
+    /// This function releases the frame buffer back to the camera driver.
+    pub fn release_frame(&mut self, frame: camera::CameraFrame) {
+        self.camera.release_frame(frame);
+    }
+
     /// Configure the camera sensor with the given parameters
     pub fn configure_sensor(&mut self, config: &camera::SensorConfig) {
         self.camera.configure_sensor(config);

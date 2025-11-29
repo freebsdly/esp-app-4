@@ -3,7 +3,6 @@
 //! 该模块定义了背光控制的统一接口和实现，支持直接PWM控制和通过IO扩展器控制两种方式。
 
 use esp_hal::i2c::master::Error as I2cError;
-use embassy_time::Delay;
 
 /// 背光控制状态枚举
 #[derive(Debug, Clone, Copy)]

@@ -104,6 +104,10 @@ use esp_hal::timer::timg::TimerGroup;
 #[allow(unused)]
 use {esp_backtrace, esp_println};
 
+use crate::camera::CameraFrame;
+use crate::spi_lcd::ST7789;
+use embedded_graphics::prelude::RgbColor;
+
 mod ap3216c;
 mod backlight;
 mod button;
@@ -293,26 +297,42 @@ async fn main(spawner: Spawner) {
     // 等待显示初始化完成
     embassy_time::Timer::after_millis(100).await;
 
-    // 使用embedded-graphics绘制图形
+    // 使用embedded-graphics绘制图形来测试显示是否正常工作
     use embedded_graphics::pixelcolor::Rgb565;
     use embedded_graphics::prelude::*;
+    use embedded_graphics::primitives::{Rectangle, PrimitiveStyle};
 
-    // 清屏为白色背景
-    let _ = display.clear(Rgb565::WHITE);
+    // 清屏为蓝色背景来确认显示是否工作
+    let _ = display.clear(Rgb565::BLUE);
+    
+    // 绘制几个不同颜色的矩形来测试颜色显示
+    let red_square = Rectangle::new(Point::new(10, 10), Size::new(50, 50))
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::RED));
+    let _ = red_square.draw(&mut display);
+    
+    let green_square = Rectangle::new(Point::new(70, 10), Size::new(50, 50))
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN));
+    let _ = green_square.draw(&mut display);
+    
+    let blue_square = Rectangle::new(Point::new(130, 10), Size::new(50, 50))
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::BLUE));
+    let _ = blue_square.draw(&mut display);
+    
+    // 绘制黄色和洋红色方块来进一步测试颜色混合
+    let yellow_square = Rectangle::new(Point::new(10, 70), Size::new(50, 50))
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::YELLOW));
+    let _ = yellow_square.draw(&mut display);
+    
+    let magenta_square = Rectangle::new(Point::new(70, 70), Size::new(50, 50))
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::MAGENTA));
+    let _ = magenta_square.draw(&mut display);
+    
+    let cyan_square = Rectangle::new(Point::new(130, 70), Size::new(50, 50))
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::CYAN));
+    let _ = cyan_square.draw(&mut display);
 
-    // 创建屏幕日志记录器（放在所有图形绘制之后）
-    let display_logger = console::DisplayLogger::new(&mut display);
-
-    // 初始化全局显示日志记录器
-    console::init_global_logger(unsafe { core::mem::transmute(display_logger) });
-
-    // 显示初始日志信息
-    console::log_to_display("system init");
-    console::log_to_display("--------------------");
-    console::log_to_display("wait for key...");
-
-    // 将SPI总线还回，以便其他组件可以使用它
-    let spi = display.release_spi();
+    // 等待一段时间观察屏幕显示
+    embassy_time::Timer::after_millis(2000).await;
 
     // 初始化摄像头
     info!("Initializing OV5640 camera...");
@@ -369,13 +389,90 @@ async fn main(spawner: Spawner) {
 
             // 启动摄像头显示任务
             // 注意：SPI LCD的显示任务与RGB LCD不同，需要专门适配
-            // let result = spawner.spawn(camera_display_task(ov5640_camera, rgb_lcd));
-            // if result.is_err() {
-            //     warn!("Failed to spawn camera display task");
-            // }
+            let result = spawner.spawn(camera_display_task(ov5640_camera, display));
+            if result.is_err() {
+                warn!("Failed to spawn camera display task");
+            }
         }
         Err(e) => {
             warn!("Failed to initialize OV5640 camera: {}", e);
         }
     }
+}
+
+/// 摄像头显示任务
+///
+/// 这个任务持续从摄像头捕获图像并在SPI LCD上显示
+#[embassy_executor::task]
+async fn camera_display_task(
+    mut camera: ov5640::OV5640Camera<'static>,
+    mut display: ST7789<'static>,
+) {
+    loop {
+        // 捕获一帧图像
+        match camera.capture_frame().await {
+            Ok(frame) => {
+                // 在SPI LCD上显示图像
+                let _ = display_image(&mut display, &frame).await;
+                // 释放帧缓冲区内存
+                camera.release_frame(frame);
+            }
+            Err(e) => {
+                defmt::warn!("Failed to capture frame: {}", e);
+            }
+        }
+
+        // 等待一小段时间再捕获下一帧
+        embassy_time::Timer::after_millis(50).await;
+    }
+}
+
+/// 在SPI LCD上显示图像
+async fn display_image(
+    display: &mut ST7789<'_>,
+    frame: &CameraFrame,
+) -> Result<(), esp_hal::spi::Error> {
+    // 清屏为黑色
+    use embedded_graphics::pixelcolor::Rgb565;
+    
+    // 先清屏确保没有残留的白色区域
+    display.fill_screen(Rgb565::BLACK)?;
+    
+    // 简单的图像显示实现
+    // 注意：这是一个简化的实现，实际应用中可能需要更好的缩放算法
+    if frame.width == 320 && frame.height == 240 {
+        // 图像尺寸正好适合屏幕旋转后的尺寸
+        // 我们需要将RGB565数据写入LCD
+        write_frame(display, frame)?;
+    } else {
+        // 其他尺寸，简单填充屏幕中心区域
+        display.fill_rectangle(0, 0, 240, 320, Rgb565::BLUE)?;
+    }
+
+    Ok(())
+}
+
+/// 将帧数据写入LCD显示
+fn write_frame(
+    display: &mut spi_lcd::ST7789<'_>,
+    frame: &camera::CameraFrame,
+) -> Result<(), esp_hal::spi::Error> {
+    // 设置显示窗口为整个屏幕区域
+    // 注意：对于240x320的屏幕，坐标范围是0-239和0-319
+    display.set_address_window(0, 0, 239, 319)?;
+
+    // 发送RAM写入命令
+    display.write_command(0x2C, &[])?;
+
+    // 设置为数据模式
+    display.dc.set_high();
+
+    // 发送图像数据
+    // 注意：这里简化处理，实际应该进行适当的格式转换
+    if !frame.data.is_empty() {
+        // 对于RGB565数据，我们需要确保字节顺序正确
+        display.spi_mut().write(&frame.data)?;
+    }
+
+    Ok(())
 }

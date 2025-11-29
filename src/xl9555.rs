@@ -226,12 +226,12 @@ pub async fn spi_lcd_reset(state: bool) -> Result<(), I2cError> {
 /// 公共接口函数：控制 LCD 背光开关
 ///
 /// 通过该函数可以外部调用设置 LCD 背光的开关状态
-/// 控制的是 XL9555 的 P1.0 引脚，该引脚连接到 RGB LCD 模块的背光控制电路
+/// 控制的是 XL9555 的 P1.3 引脚，该引脚连接到 SPI LCD 模块的电源控制电路
 ///
 /// # 参数
 /// * `state` - 背光状态，true 表示开启背光，false 表示关闭背光
 pub async fn set_lcd_backlight(state: bool) -> Result<(), I2cError> {
-    i2c::with_i2c(|i2c_ref| set_spi_lcd_reset_state(i2c_ref, state)).await
+    i2c::with_i2c(|i2c_ref| set_spi_lcd_power_state(i2c_ref, state)).await
 }
 
 /// 初始化ATK-MD0240模块

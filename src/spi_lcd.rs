@@ -61,7 +61,7 @@ pub enum Orientation {
 /// ST7789 display driver
 pub struct ST7789<'d> {
     spi: Spi<'d, Blocking>,
-    dc: Output<'static>,
+    pub(crate) dc: Output<'static>,
     rst: Option<Output<'static>>,
     width: u16,
     height: u16,
@@ -98,7 +98,7 @@ impl<'d> ST7789<'d> {
             rst.set_low();
             self.delay.delay_millis(10);
             rst.set_high();
-            self.delay.delay_millis(120); // 等待内部初始化完成
+            self.delay.delay_millis(150); // 增加延迟确保复位完成
         } else {
             // 2. 软件复位（SWRESET）
             self.write_command(CMD_SWRESET, &[])?;
@@ -107,23 +107,26 @@ impl<'d> ST7789<'d> {
 
         // 3. 退出睡眠模式（SLPOUT）
         self.write_command(CMD_SLPOUT, &[])?;
-        self.delay.delay_millis(120); // 必须等待 5ms，建议 100~120ms
+        self.delay.delay_millis(150); // 增加延迟确保退出睡眠模式
 
-        // 4. 发送初始化序列（关键寄存器配置）
-        // 设置内存数据访问控制
-        self.write_command(CMD_MADCTL, &[0x00])?; // 正常方向
-
-        // 设置像素格式
+        // 4. 设置像素格式为RGB565
         self.write_command(CMD_COLMOD, &[0x55])?; // 16-bit/pixel (RGB565)
+        self.delay.delay_millis(10);
 
+        // 5. 设置内存数据访问控制 - 根据屏幕方向调整
+        // 使用BGR颜色顺序，横屏模式
+        self.write_command(CMD_MADCTL, &[MADCTL_MV | MADCTL_BGR])?;
+        self.delay.delay_millis(10);
+
+        // 6. 设置显示方向和其他参数
         // PORCTRK: Porch Setting
         self.write_command(0xB2, &[0x0C, 0x0C, 0x00, 0x33, 0x33])?;
 
         // GATECTRL: Gate Control
         self.write_command(0xB7, &[0x35])?;
 
-        // VCOMS: VCOM Setting
-        self.write_command(0xBB, &[0x19])?;
+        // VCOMS: VCOM Setting (调整VCOMH电压)
+        self.write_command(0xBB, &[0x1F])?; // 增加VCOMH电压
 
         // LCMCTRL: LCM Control
         self.write_command(0xC0, &[0x2C])?;
@@ -143,31 +146,41 @@ impl<'d> ST7789<'d> {
         // PWCTR1: Power Control 1
         self.write_command(0xD0, &[0xA4, 0xA1])?;
 
-        // 正电压伽马校正
+        // 正电压伽马校正 (调整伽马值)
         self.write_command(
             0xE0,
             &[
-                0xD0, 0x04, 0x0D, 0x11, 0x13, 0x2B, 0x3F, 0x54, 0x4C, 0x18, 0x0D, 0x0B, 0x1F, 0x23,
+                0xD0, 0x08, 0x11, 0x08, 0x0C, 0x15, 0x39, 0x33, 0x50, 0x36, 0x13, 0x14, 0x29, 0x2D,
             ],
         )?;
 
-        // 负电压伽马校正
+        // 负电压伽马校正 (调整伽马值)
         self.write_command(
             0xE1,
             &[
-                0xD0, 0x04, 0x0C, 0x11, 0x13, 0x2C, 0x3F, 0x44, 0x51, 0x2F, 0x1F, 0x1F, 0x20, 0x23,
+                0xD0, 0x08, 0x10, 0x08, 0x06, 0x06, 0x39, 0x44, 0x51, 0x0B, 0x16, 0x14, 0x2F, 0x31,
             ],
         )?;
 
-        // 5. 开启显示（DISPON）
+        // 7. 显示反转关闭
+        self.write_command(CMD_INVOFF, &[])?;
+        
+        // 8. 正常显示模式
+        self.write_command(CMD_NORON, &[])?;
+        self.delay.delay_millis(10);
+
+        // 9. 开启显示（DISPON）
         self.write_command(CMD_DISPON, &[])?;
         self.delay.delay_millis(100);
+
+        // 10. 设置默认显示窗口以避免白边
+        self.set_address_window(0, 0, self.width - 1, self.height - 1)?;
 
         Ok(())
     }
 
     /// Write a command to the display
-    fn write_command(&mut self, cmd: u8, data: &[u8]) -> Result<(), esp_hal::spi::Error> {
+    pub(crate) fn write_command(&mut self, cmd: u8, data: &[u8]) -> Result<(), esp_hal::spi::Error> {
         self.dc.set_low(); // Command mode
         self.spi.write(&[cmd])?;
 
@@ -180,7 +193,7 @@ impl<'d> ST7789<'d> {
     }
 
     /// Set the address window for drawing
-    fn set_address_window(
+    pub(crate) fn set_address_window(
         &mut self,
         x0: u16,
         y0: u16,
@@ -245,16 +258,18 @@ impl<'d> ST7789<'d> {
         h: u16,
         color: Rgb565,
     ) -> Result<(), esp_hal::spi::Error> {
+        // 检查边界，确保不超过屏幕范围
         if x >= self.width || y >= self.height {
             return Ok(());
         }
 
+        // 计算右下角坐标
         let x1 = x + w - 1;
         let y1 = y + h - 1;
 
-        if x1 >= self.width || y1 >= self.height {
-            return Ok(());
-        }
+        // 确保不超过屏幕边界
+        let x1 = x1.min(self.width - 1);
+        let y1 = y1.min(self.height - 1);
 
         // 6. 设置显示区域（列和行地址）
         self.set_address_window(x, y, x1, y1)?;
@@ -363,7 +378,12 @@ impl<'d> DrawTarget for ST7789<'d> {
         if x < self.width && y < self.height {
             let w = width.min(self.width - x);
             let h = height.min(self.height - y);
-            self.fill_rectangle(x, y, w, h, color)
+            // 确保宽度和高度至少为1
+            if w > 0 && h > 0 {
+                self.fill_rectangle(x, y, w, h, color)
+            } else {
+                Ok(())
+            }
         } else {
             Ok(())
         }
