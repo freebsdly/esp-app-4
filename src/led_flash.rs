@@ -396,16 +396,14 @@ impl LEDFlashController {
 
         // 配置STROBE引脚相关的寄存器
         // 根据用户提供的详细配置信息:
-        // TODO: 实际的寄存器配置需要根据OV5640数据手册进行
-        // 示例代码如下：
-        // self.write_i2c(0x300A, 0x01)?;     // 启用STROBE功能
-        // self.write_i2c(0x3A20, 0x84)?;     // STROBE选项配置
-        // self.write_i2c(0x3A21, 0x78)?;     // 插入帧数控制
-        // self.write_i2c(0x3A08, 0x01)?;     // LED模式曝光值添加
-        // self.write_i2c(0x3A1D, 0x18)?;     // LED模式行数添加（低字节）
-        // self.write_i2c(0x3A1E, 0x68)?;     // 稳定范围下限
-        // self.write_i2c(0x3A1F, 0x40)?;     // 快速区域下限
-        // self.write_i2c(0x3A00, 0x58)?;     // AEC系统控制（包含LED设置）
+        self.write_i2c(0x300A, 0x01)?;     // 启用STROBE功能
+        self.write_i2c(0x3A20, 0x84)?;     // STROBE选项配置
+        self.write_i2c(0x3A21, 0x78)?;     // 插入帧数控制
+        self.write_i2c(0x3A08, 0x01)?;     // LED模式曝光值添加
+        self.write_i2c(0x3A1D, 0x18)?;     // LED模式行数添加（低字节）
+        self.write_i2c(0x3A1E, 0x68)?;     // 稳定范围下限
+        self.write_i2c(0x3A1F, 0x40)?;     // 快速区域下限
+        self.write_i2c(0x3A00, 0x58)?;     // AEC系统控制（包含LED设置）
 
         info!("LED flash functionality initialized");
         Ok(())
@@ -415,14 +413,12 @@ impl LEDFlashController {
     pub fn set_led_exposure_compensation(&mut self) -> Result<(), &'static str> {
         info!("Setting LED exposure compensation");
 
-        // TODO: 实际的寄存器配置需要根据OV5640数据手册进行
-        // 示例代码如下：
-        // self.write_i2c(0x3A08, 0x01)?;     // 开启LED模式曝光补偿
-        // self.write_i2c(0x3A1D, 0x18)?;     // LED添加行数[7:0]
-        // self.write_i2c(0x3A02, 0x03)?;     // 60Hz最大曝光
-        // self.write_i2c(0x3A03, 0xD8)?;     // 60Hz最大曝光
-        // self.write_i2c(0x3A14, 0x02)?;     // 50Hz最大曝光
-        // self.write_i2c(0x3A15, 0x50)?;     // 50Hz最大曝光
+        self.write_i2c(0x3A08, 0x01)?; // 开启LED模式曝光补偿
+        self.write_i2c(0x3A1D, 0x18)?; // LED添加行数[7:0]
+        self.write_i2c(0x3A02, 0x03)?; // 60Hz最大曝光
+        self.write_i2c(0x3A03, 0xD8)?; // 60Hz最大曝光
+        self.write_i2c(0x3A14, 0x02)?; // 50Hz最大曝光
+        self.write_i2c(0x3A15, 0x50)?; // 50Hz最大曝光
 
         info!("LED exposure compensation set");
         Ok(())
@@ -446,8 +442,7 @@ impl LEDFlashController {
             StrobeMode::Disable => 0x00,
         };
 
-        // TODO: 写入STROBE控制寄存器
-        // self.write_i2c(0x300A, strobe_reg)?;
+        self.write_i2c(0x300A, strobe_reg)?;
 
         // 设置LED强度（在实际硬件中会转换为PWM占空比）
         info!("Flash intensity set to {}%", self.led_ctrl.flash_intensity);
@@ -541,9 +536,12 @@ impl LEDFlashController {
         // 1. 首先确保OV5640内部寄存器已正确配置
         self.init()?;
 
+        // 2. 根据模式执行不同的闪光序列
         match self.mode() {
             LEDMode::RedEyeReduction => {
                 // 红眼消除模式需要预闪+主闪的双脉冲序列
+                info!("Triggering red-eye reduction flash sequence");
+
                 // 预闪
                 self.control_strobe_pin(true).await?;
                 Timer::after(Duration::from_millis(self.timing.preflash_duration as u64)).await;
@@ -559,22 +557,26 @@ impl LEDFlashController {
             }
             LEDMode::FlashLED => {
                 // 普通闪光模式
+                info!("Triggering normal flash");
                 self.control_strobe_pin(true).await?;
                 Timer::after(Duration::from_millis(self.timing.mainflash_duration as u64)).await;
                 self.control_strobe_pin(false).await?;
             }
             LEDMode::TorchLED => {
                 // 手电筒模式，持续照明
+                info!("Enabling torch mode");
                 self.control_strobe_pin(true).await?;
             }
             LEDMode::AutoFlash => {
                 // 自动闪光模式，根据环境光自动调整
+                info!("Triggering auto flash");
                 self.control_strobe_pin(true).await?;
                 Timer::after(Duration::from_millis(self.timing.mainflash_duration as u64)).await;
                 self.control_strobe_pin(false).await?;
             }
         }
 
+        info!("LED flash sequence completed");
         Ok(())
     }
 
@@ -588,6 +590,28 @@ impl LEDFlashController {
         crate::xl9555::control_strobe_pin(state)
             .await
             .map_err(|_| "Failed to control STROBE pin")
+    }
+
+    /// 写入OV5640寄存器
+    fn write_i2c(&mut self, reg: u16, value: u8) -> Result<(), &'static str> {
+        info!("Writing to register 0x{:04x}: 0x{:02x}", reg, value);
+
+        // TODO: 实现实际的I2C写入操作
+        // 这里需要访问OV5640摄像头的I2C接口
+        // 暂时返回Ok以避免编译错误
+
+        Ok(())
+    }
+
+    /// 读取OV5640寄存器
+    fn read_i2c(&mut self, reg: u16) -> Result<u8, &'static str> {
+        info!("Reading from register 0x{:04x}", reg);
+
+        // TODO: 实现实际的I2C读取操作
+        // 这里需要访问OV5640摄像头的I2C接口
+        // 暂时返回0以避免编译错误
+
+        Ok(0)
     }
 
     /// 关闭LED闪光灯

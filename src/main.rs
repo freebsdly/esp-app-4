@@ -116,6 +116,7 @@ mod console;
 mod dht11;
 mod i2c;
 mod led;
+mod led_flash;
 mod ov5640;
 mod qma6100p;
 mod rgb_lcd;
@@ -124,7 +125,6 @@ mod spi;
 mod spi_lcd;
 mod wifi;
 mod xl9555;
-mod led_flash;
 
 // 创建 esp-idf bootloader 所需的默认应用程序描述符
 // 更多信息请参见: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -301,33 +301,33 @@ async fn main(spawner: Spawner) {
     // 使用embedded-graphics绘制图形来测试显示是否正常工作
     use embedded_graphics::pixelcolor::Rgb565;
     use embedded_graphics::prelude::*;
-    use embedded_graphics::primitives::{Rectangle, PrimitiveStyle};
+    use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 
     // 清屏为蓝色背景来确认显示是否工作
     let _ = display.clear(Rgb565::BLUE);
-    
+
     // 绘制几个不同颜色的矩形来测试颜色显示
     let red_square = Rectangle::new(Point::new(10, 10), Size::new(50, 50))
         .into_styled(PrimitiveStyle::with_fill(Rgb565::RED));
     let _ = red_square.draw(&mut display);
-    
+
     let green_square = Rectangle::new(Point::new(70, 10), Size::new(50, 50))
         .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN));
     let _ = green_square.draw(&mut display);
-    
+
     let blue_square = Rectangle::new(Point::new(130, 10), Size::new(50, 50))
         .into_styled(PrimitiveStyle::with_fill(Rgb565::BLUE));
     let _ = blue_square.draw(&mut display);
-    
+
     // 绘制黄色和洋红色方块来进一步测试颜色混合
     let yellow_square = Rectangle::new(Point::new(10, 70), Size::new(50, 50))
         .into_styled(PrimitiveStyle::with_fill(Rgb565::YELLOW));
     let _ = yellow_square.draw(&mut display);
-    
+
     let magenta_square = Rectangle::new(Point::new(70, 70), Size::new(50, 50))
         .into_styled(PrimitiveStyle::with_fill(Rgb565::MAGENTA));
     let _ = magenta_square.draw(&mut display);
-    
+
     let cyan_square = Rectangle::new(Point::new(130, 70), Size::new(50, 50))
         .into_styled(PrimitiveStyle::with_fill(Rgb565::CYAN));
     let _ = cyan_square.draw(&mut display);
@@ -388,6 +388,40 @@ async fn main(spawner: Spawner) {
                 }
             }
 
+            // 创建一次性的LED闪光灯控制器用于首次拍照
+            let mut led_flash = led_flash::LEDFlashController::new();
+            
+            // 初始化LED闪光灯（只需要初始化一次）
+            if let Err(e) = led_flash.init() {
+                warn!("Failed to initialize LED flash: {}", e);
+            } else {
+                // 开机自动拍照并使用闪光灯
+                info!("Taking auto photo with flash...");
+                
+                // 触发闪光灯
+                if let Err(e) = led_flash.trigger().await {
+                    warn!("Failed to trigger flash: {}", e);
+                }
+
+                // 等待一小段时间确保闪光灯触发
+                embassy_time::Timer::after_millis(100).await;
+            }
+
+            // 捕获一帧图像
+            match ov5640_camera.capture_frame().await {
+                Ok(frame) => {
+                    // 在SPI LCD上显示图像
+                    let _ = display_image(&mut display, &frame).await;
+                    // 释放帧缓冲区内存
+                    ov5640_camera.release_frame(frame);
+                    
+                    info!("Auto photo taken and displayed successfully");
+                }
+                Err(e) => {
+                    warn!("Failed to capture auto photo: {}", e);
+                }
+            }
+
             // 启动摄像头显示任务
             // 注意：SPI LCD的显示任务与RGB LCD不同，需要专门适配
             let result = spawner.spawn(camera_display_task(ov5640_camera, display));
@@ -409,10 +443,23 @@ async fn camera_display_task(
     mut camera: ov5640::OV5640Camera<'static>,
     mut display: ST7789<'static>,
 ) {
+    // 创建LED闪光灯控制器（只需要创建一次）
+    let mut led_flash = led_flash::LEDFlashController::new();
+    
+    // 初始化LED闪光灯（只需要初始化一次）
+    if let Err(e) = led_flash.init() {
+        defmt::warn!("Failed to initialize LED flash: {}", e);
+    }
+
     loop {
         // 捕获一帧图像
         match camera.capture_frame().await {
             Ok(frame) => {
+                // 触发闪光灯
+                if let Err(e) = led_flash.trigger().await {
+                    defmt::warn!("Failed to trigger flash: {}", e);
+                }
+                
                 // 在SPI LCD上显示图像
                 let _ = display_image(&mut display, &frame).await;
                 // 释放帧缓冲区内存
@@ -435,10 +482,10 @@ async fn display_image(
 ) -> Result<(), esp_hal::spi::Error> {
     // 清屏为黑色
     use embedded_graphics::pixelcolor::Rgb565;
-    
+
     // 先清屏确保没有残留的白色区域
     display.fill_screen(Rgb565::BLACK)?;
-    
+
     // 简单的图像显示实现
     // 注意：这是一个简化的实现，实际应用中可能需要更好的缩放算法
     if frame.width == 240 && frame.height == 320 {

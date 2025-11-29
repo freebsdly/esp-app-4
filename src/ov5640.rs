@@ -877,7 +877,7 @@ impl<'a> OV5640Camera<'a> {
     /// Write data to the camera via I2C
     ///
     /// This is a placeholder function that would interface with the actual I2C hardware.
-    fn write_i2c(&mut self, reg: u16, value: u8) -> Result<(), &'static str> {
+    pub fn write_i2c(&mut self, reg: u16, value: u8) -> Result<(), &'static str> {
         info!("Writing to register 0x{:04x}: 0x{:02x}", reg, value);
 
         // In a real implementation, this would write to the camera via I2C
@@ -892,7 +892,7 @@ impl<'a> OV5640Camera<'a> {
     /// Read data from the camera via I2C
     ///
     /// This is a placeholder function that would interface with the actual I2C hardware.
-    fn read_i2c(&mut self, reg: u16) -> Result<u8, &'static str> {
+    pub fn read_i2c(&mut self, reg: u16) -> Result<u8, &'static str> {
         info!("Reading from register 0x{:04x}", reg);
 
         // In a real implementation, this would read from the camera via I2C

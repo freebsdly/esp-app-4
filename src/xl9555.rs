@@ -247,10 +247,11 @@ pub async fn control_strobe_pin(state: bool) -> Result<(), I2cError> {
         i2c_ref.write_read(XL9555_ADDR, &[registers::OUTPUT_PORT_0], &mut port0_data)?;
         
         // 根据状态设置STROBE引脚 (P0.6)
+        // io_bits::GBC_LED_IO = 0x0040，即第6位
         let new_port0_data = if state {
-            port0_data[0] | (io_bits::GBC_LED_IO >> 8) as u8 // 设置P0.6为高电平
+            port0_data[0] | 0x40 // 设置P0.6为高电平
         } else {
-            port0_data[0] & !((io_bits::GBC_LED_IO >> 8) as u8) // 设置P0.6为低电平
+            port0_data[0] & !0x40 // 设置P0.6为低电平
         };
 
         // 写回端口0输出
