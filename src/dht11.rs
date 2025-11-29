@@ -278,7 +278,7 @@ fn wait_for_with_level(
 pub async fn check_hardware_config() -> bool {
     let mut guard = DHT11_PIN.lock().await;
     let flex_pin = guard.as_mut().unwrap();
-    let mut delay = Delay::new();
+    let delay = Delay::new();
 
     info!("=== DHT11 Hardware Configuration Check ===");
 

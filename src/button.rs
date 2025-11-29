@@ -104,6 +104,20 @@ fn toggle_lcd_backlight(i2c_ref: &mut I2c<Blocking>) -> Result<(), I2cError> {
     Ok(())
 }
 
+/// 切换RGB LCD背光状态
+///
+/// 该函数负责切换RGB LCD背光的开/关状态，复用与SPI LCD相同的控制引脚
+///
+/// # 参数
+/// * `i2c_ref` - I2C接口引用，用于与XL9555芯片通信
+///
+/// # 返回值
+/// * `Result<(), esp_hal::i2c::Error>` - 操作结果，成功或错误信息
+fn toggle_rgb_lcd_backlight(i2c_ref: &mut I2c<Blocking>) -> Result<(), I2cError> {
+    // 复用相同的背光控制函数，因为RGB LCD和SPI LCD使用相同的控制引脚(P1.3)
+    toggle_lcd_backlight(i2c_ref)
+}
+
 /// 控制蜂鸣器状态
 ///
 /// 该函数负责控制蜂鸣器的开/关状态，并更新相关的状态跟踪变量

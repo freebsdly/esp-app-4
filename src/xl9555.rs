@@ -61,7 +61,7 @@ pub mod registers {
 /// - P1 端口（P1.0-P1.7）：主要用于 LCD 控制信号输出
 ///
 /// 引脚分配说明：
-/// - LCD_BL_IO: P1.0 - LCD 背光控制（备用）
+/// - LCD_BL_IO: P1.0 - LCD 背光控制
 /// - SLCD_RST_IO: P1.2 - SPI LCD 复位信号
 /// - SLCD_PWR_IO: P1.3 - SPI LCD 电源/背光控制
 /// - KEY0_IO: P1.7 - 按键 0 输入
@@ -169,6 +169,30 @@ pub fn set_spi_lcd_power_state(i2c_ref: &mut I2c<Blocking>, state: bool) -> Resu
     i2c_ref.write(XL9555_ADDR, &[registers::OUTPUT_PORT_1, new_port1_data])
 }
 
+/// 控制 RGB LCD 背光状态
+///
+/// 操作 I2C 接口控制 XL9555 的 P1.0 引脚来控制 RGB LCD 背光
+/// 根据硬件设计，该引脚连接到 RGB LCD 的背光控制电路
+/// 当引脚被拉高时背光点亮，拉低时背光关闭
+///
+/// # 参数
+/// * `i2c_ref` - I2C 接口引用
+/// * `state` - 背光状态，true 表示开启（高电平），false 表示关闭（低电平）
+pub fn set_rgb_lcd_backlight_state(i2c_ref: &mut I2c<Blocking>, state: bool) -> Result<(), I2cError> {
+    // 读取当前端口1输出状态
+    let mut port1_data = [0u8];
+    i2c_ref.write_read(XL9555_ADDR, &[registers::OUTPUT_PORT_1], &mut port1_data)?;
+    // 根据状态设置 RGB LCD 背光引脚 (P1.0)
+    let new_port1_data = if state {
+        port1_data[0] | (io_bits::LCD_BL_IO >> 8) as u8 // 设置P1.0为高电平
+    } else {
+        port1_data[0] & !((io_bits::LCD_BL_IO >> 8) as u8) // 设置P1.0为低电平
+    };
+
+    // 写回端口1输出
+    i2c_ref.write(XL9555_ADDR, &[registers::OUTPUT_PORT_1, new_port1_data])
+}
+
 // 控制 SPI LCD 复位状态
 ///
 /// 操作 I2C 接口控制 XL9555 的 P1.2 引脚来控制 LCD 复位信号
@@ -199,12 +223,12 @@ pub async fn spi_lcd_reset(state: bool) -> Result<(), I2cError> {
 /// 公共接口函数：控制 LCD 背光开关
 ///
 /// 通过该函数可以外部调用设置 LCD 背光的开关状态
-/// 控制的是 XL9555 的 P1.3 引脚，该引脚连接到 ATK-MD0240 模块的 PWR 引脚
+/// 控制的是 XL9555 的 P1.0 引脚，该引脚连接到 RGB LCD 模块的背光控制电路
 ///
 /// # 参数
 /// * `state` - 背光状态，true 表示开启背光，false 表示关闭背光
 pub async fn set_lcd_backlight(state: bool) -> Result<(), I2cError> {
-    i2c::with_i2c(|i2c_ref| set_spi_lcd_power_state(i2c_ref, state)).await
+    i2c::with_i2c(|i2c_ref| set_rgb_lcd_backlight_state(i2c_ref, state)).await
 }
 
 /// 初始化ATK-MD0240模块

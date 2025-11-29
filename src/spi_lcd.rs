@@ -6,7 +6,7 @@
 
 use embedded_graphics::{
     draw_target::DrawTarget,
-    pixelcolor::{Rgb565, raw::RawU16},
+    pixelcolor::{raw::RawU16, Rgb565},
     prelude::*,
     primitives::Rectangle,
 };
@@ -37,13 +37,13 @@ const CMD_FCS: u8 = 0xF0; // Frame rate control
 const CMD_CSC: u8 = 0xF1; // Clock Speed Control
 
 // MADCTL register bits
-const MADCTL_MY: u8 = 0x80;  // Page Address Order (0: top to bottom, 1: bottom to top)
-const MADCTL_MX: u8 = 0x40;  // Column Address Order (0: left to right, 1: right to left)
-const MADCTL_MV: u8 = 0x20;  // Page/Column Order (0: normal mode, 1: reverse mode)
-const MADCTL_ML: u8 = 0x10;  // Line Address Order (0: LCD refresh from top to bottom, 1: bottom to top)
+const MADCTL_MY: u8 = 0x80; // Page Address Order (0: top to bottom, 1: bottom to top)
+const MADCTL_MX: u8 = 0x40; // Column Address Order (0: left to right, 1: right to left)
+const MADCTL_MV: u8 = 0x20; // Page/Column Order (0: normal mode, 1: reverse mode)
+const MADCTL_ML: u8 = 0x10; // Line Address Order (0: LCD refresh from top to bottom, 1: bottom to top)
 const MADCTL_RGB: u8 = 0x00; // RGB Order (0: RGB, 1: BGR)
 const MADCTL_BGR: u8 = 0x08; // BGR Order (0: RGB, 1: BGR)
-const MADCTL_MH: u8 = 0x04;  // Display Data Latch Order (0: LCD refresh from left to right, 1: right to left)
+const MADCTL_MH: u8 = 0x04; // Display Data Latch Order (0: LCD refresh from left to right, 1: right to left)
 
 /// Display orientation
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -78,11 +78,9 @@ impl<'d> ST7789<'d> {
         height: u16,
     ) -> Self {
         let dc = Output::new(dc, Level::Low, Default::default());
-        
-        let rst = rst.map(|rst| {
-            Output::new(rst, Level::High, Default::default())
-        });
-        
+
+        let rst = rst.map(|rst| Output::new(rst, Level::High, Default::default()));
+
         Self {
             spi,
             dc,
@@ -146,15 +144,25 @@ impl<'d> ST7789<'d> {
         self.write_command(0xD0, &[0xA4, 0xA1])?;
 
         // 正电压伽马校正
-        self.write_command(0xE0, &[0xD0, 0x04, 0x0D, 0x11, 0x13, 0x2B, 0x3F, 0x54, 0x4C, 0x18, 0x0D, 0x0B, 0x1F, 0x23])?;
+        self.write_command(
+            0xE0,
+            &[
+                0xD0, 0x04, 0x0D, 0x11, 0x13, 0x2B, 0x3F, 0x54, 0x4C, 0x18, 0x0D, 0x0B, 0x1F, 0x23,
+            ],
+        )?;
 
         // 负电压伽马校正
-        self.write_command(0xE1, &[0xD0, 0x04, 0x0C, 0x11, 0x13, 0x2C, 0x3F, 0x44, 0x51, 0x2F, 0x1F, 0x1F, 0x20, 0x23])?;
+        self.write_command(
+            0xE1,
+            &[
+                0xD0, 0x04, 0x0C, 0x11, 0x13, 0x2C, 0x3F, 0x44, 0x51, 0x2F, 0x1F, 0x1F, 0x20, 0x23,
+            ],
+        )?;
 
         // 5. 开启显示（DISPON）
         self.write_command(CMD_DISPON, &[])?;
         self.delay.delay_millis(100);
-        
+
         Ok(())
     }
 
@@ -162,17 +170,23 @@ impl<'d> ST7789<'d> {
     fn write_command(&mut self, cmd: u8, data: &[u8]) -> Result<(), esp_hal::spi::Error> {
         self.dc.set_low(); // Command mode
         self.spi.write(&[cmd])?;
-        
+
         if !data.is_empty() {
             self.dc.set_high(); // Data mode
             self.spi.write(data)?;
         }
-        
+
         Ok(())
     }
 
     /// Set the address window for drawing
-    fn set_address_window(&mut self, x0: u16, y0: u16, x1: u16, y1: u16) -> Result<(), esp_hal::spi::Error> {
+    fn set_address_window(
+        &mut self,
+        x0: u16,
+        y0: u16,
+        x1: u16,
+        y1: u16,
+    ) -> Result<(), esp_hal::spi::Error> {
         // CASET: Column Address Set
         self.write_command(
             CMD_CASET,
@@ -183,7 +197,7 @@ impl<'d> ST7789<'d> {
                 (x1 & 0xFF) as u8,
             ],
         )?;
-        
+
         // PASET: Page Address Set
         self.write_command(
             CMD_RASET,
@@ -194,7 +208,7 @@ impl<'d> ST7789<'d> {
                 (y1 & 0xFF) as u8,
             ],
         )?;
-        
+
         Ok(())
     }
 
@@ -206,14 +220,14 @@ impl<'d> ST7789<'d> {
 
         self.set_address_window(x, y, x, y)?;
         self.write_command(CMD_RAMWR, &[])?;
-        
+
         self.dc.set_high(); // Data mode
         let color = RawU16::from(color).into_inner();
         // Prepare color data with correct byte order for RGB565 format (MSB first)
         // First send high byte (MSB), then low byte (LSB)
         let color_data = [(color >> 8) as u8, (color & 0xFF) as u8];
         self.spi.write(&color_data)?;
-        
+
         Ok(())
     }
 
@@ -244,41 +258,41 @@ impl<'d> ST7789<'d> {
 
         // 6. 设置显示区域（列和行地址）
         self.set_address_window(x, y, x1, y1)?;
-        
+
         // 7. 开始写显存
         self.write_command(CMD_RAMWR, &[])?;
-        
+
         self.dc.set_high(); // Data mode
-        
+
         let color = RawU16::from(color).into_inner();
         let count = w as usize * h as usize;
-        
+
         // Prepare color data with correct byte order for RGB565 format (MSB first)
         // First send high byte (MSB), then low byte (LSB)
         let color_data = [(color >> 8) as u8, (color & 0xFF) as u8];
-        
+
         // 使用批量写入优化性能
         // 创建足够大的缓冲区来保存所有像素数据
         let mut buffer = [0u8; 2048]; // 1024个像素的数据
         let mut buffer_index = 0;
-        
+
         for _ in 0..count {
             buffer[buffer_index] = color_data[0];
             buffer[buffer_index + 1] = color_data[1];
             buffer_index += 2;
-            
+
             // 当缓冲区满时，写入数据
             if buffer_index >= buffer.len() {
                 self.spi.write(&buffer[..buffer_index])?;
                 buffer_index = 0;
             }
         }
-        
+
         // 写入剩余的数据
         if buffer_index > 0 {
             self.spi.write(&buffer[..buffer_index])?;
         }
-        
+
         Ok(())
     }
 
@@ -310,7 +324,7 @@ impl<'d> ST7789<'d> {
     pub fn spi_mut(&mut self) -> &mut Spi<'d, Blocking> {
         &mut self.spi
     }
-    
+
     /// 释放SPI实例的所有权
     pub fn release_spi(self) -> Spi<'d, Blocking> {
         self.spi
@@ -327,8 +341,11 @@ impl<'d> DrawTarget for ST7789<'d> {
     {
         for Pixel(coord, color) in pixels.into_iter() {
             // Check bounds before drawing
-            if coord.x >= 0 && coord.y >= 0 && 
-               (coord.x as u16) < self.width && (coord.y as u16) < self.height {
+            if coord.x >= 0
+                && coord.y >= 0
+                && (coord.x as u16) < self.width
+                && (coord.y as u16) < self.height
+            {
                 self.draw_pixel(coord.x as u16, coord.y as u16, color)?;
             }
         }
@@ -341,7 +358,7 @@ impl<'d> DrawTarget for ST7789<'d> {
         let y = area.top_left.y.max(0) as u16;
         let width = area.size.width as u16;
         let height = area.size.height as u16;
-        
+
         // Make sure we don't exceed display boundaries
         if x < self.width && y < self.height {
             let w = width.min(self.width - x);
@@ -351,7 +368,7 @@ impl<'d> DrawTarget for ST7789<'d> {
             Ok(())
         }
     }
-    
+
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
         self.fill_screen(color)
     }
