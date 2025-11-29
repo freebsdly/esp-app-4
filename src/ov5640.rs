@@ -144,7 +144,6 @@
 //! - Power management: Intelligent charge/discharge control
 
 use defmt::info;
-
 use crate::camera;
 
 /// OV5640 LED模式定义
@@ -681,17 +680,13 @@ impl<'a> OV5640Camera<'a> {
         let timing = constants::power::PowerUpTiming::default();
 
         // Step 1: Pull RESETB low, pull PWDN high
-        if let Some(reset_pin) = &self.camera.config.pins.pin_reset {
-            info!("Pulling RESETB low");
-            // In a real implementation, we would control the actual GPIO pin
-            // reset_pin.set_low();
-        }
+        info!("Pulling RESETB low");
+        // Using XL9555 to control RESET pin
+        crate::xl9555::control_ov_reset_pin(false).await.map_err(|_| "Failed to control RESET pin")?;
 
-        if let Some(pwdn_pin) = &self.camera.config.pins.pin_pwdn {
-            info!("Pulling PWDN high");
-            // In a real implementation, we would control the actual GPIO pin
-            // pwdn_pin.set_high();
-        }
+        info!("Pulling PWDN high");
+        // Using XL9555 to control PWDN pin
+        crate::xl9555::control_ov_pwdn_pin(true).await.map_err(|_| "Failed to control PWDN pin")?;
 
         // Step 2: Power up DOVDD and AVDD (DOVDD before AVDD)
         info!("Step 2: Power up DOVDD and AVDD");
@@ -708,25 +703,26 @@ impl<'a> OV5640Camera<'a> {
         info!("Step 3: Waiting for AVDD stable, then pull PWDN low");
         embassy_time::Timer::after(embassy_time::Duration::from_millis(timing.t2 as u64)).await;
 
-        if let Some(pwdn_pin) = &self.camera.config.pins.pin_pwdn {
+        if let Some(_pwdn_pin) = self.camera.config.pins.pin_pwdn.as_mut() {
             info!("Pulling PWDN low");
-            // In a real implementation, we would control the actual GPIO pin
-            // pwdn_pin.set_low();
+            // Using XL9555 to control PWDN pin
+            crate::xl9555::control_ov_pwdn_pin(false).await.map_err(|_| "Failed to control PWDN pin")?;
         }
 
         // Step 4: After PWDN low for t3 ms (typically 1ms), pull RESETB high
         info!("Step 4: Waiting, then pull RESETB high");
         embassy_time::Timer::after(embassy_time::Duration::from_millis(timing.t3 as u64)).await;
 
-        if let Some(reset_pin) = &self.camera.config.pins.pin_reset {
+        if let Some(_reset_pin) = self.camera.config.pins.pin_reset.as_mut() {
             info!("Pulling RESETB high");
-            // In a real implementation, we would control the actual GPIO pin
-            // reset_pin.set_high();
+            // Using XL9555 to control RESET pin
+            crate::xl9555::control_ov_reset_pin(true).await.map_err(|_| "Failed to control RESET pin")?;
         }
 
         // Step 5: After t4 ms (typically 20ms), perform SCCB initialization
         info!("Step 5: Waiting, then perform SCCB initialization");
-        embassy_time::Timer::after(embassy_time::Duration::from_millis(timing.t4 as u64)).await;
+        // Increase wait time to ensure the camera is fully ready
+        embassy_time::Timer::after(embassy_time::Duration::from_millis((timing.t4 as u64) * 2)).await;
         self.sccb_initialization().await?;
 
         info!("OV5640 power-up sequence completed");
@@ -821,9 +817,31 @@ impl<'a> OV5640Camera<'a> {
     async fn verify_sensor_id(&mut self) -> Result<(), &'static str> {
         info!("Verifying sensor ID");
 
-        // Read the sensor ID from registers 0x300A (high byte) and 0x300B (low byte)
-        let id_high = self.read_i2c(0x300A).await?;
-        let id_low = self.read_i2c(0x300B).await?;
+        // Try multiple times to read the sensor ID in case of temporary communication issues
+        let mut retries = 3;
+        let (id_high, id_low) = loop {
+            // Read the sensor ID from registers 0x300A (high byte) and 0x300B (low byte)
+            let id_high_result = self.read_i2c(0x300A).await;
+            let id_low_result = self.read_i2c(0x300B).await;
+            
+            match (id_high_result, id_low_result) {
+                (Ok(high), Ok(low)) => {
+                    break (high, low);
+                }
+                _ => {
+                    if retries > 0 {
+                        retries -= 1;
+                        info!("Retrying sensor ID read, retries left: {}", retries);
+                        embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
+                        continue;
+                    } else {
+                        info!("Failed to read sensor ID after retries");
+                        return Err("Failed to read sensor ID");
+                    }
+                }
+            }
+        };
+        
         let sensor_id = ((id_high as u16) << 8) | (id_low as u16);
 
         if sensor_id != constants::OV5640_ID {
@@ -887,9 +905,19 @@ impl<'a> OV5640Camera<'a> {
         let data = [((reg >> 8) as u8), (reg & 0xFF) as u8, value];
 
         // Write to the camera via I2C using the SCCB interface
-        crate::i2c::with_i2c(|i2c| i2c.write(OV5640_SCCB_ADDR, &data)).await;
+        let result = crate::i2c::with_i2c(|i2c| {
+            i2c.write(OV5640_SCCB_ADDR, &data)
+        }).await;
 
-        Ok(())
+        match result {
+            Ok(_) => {
+                Ok(())
+            }
+            Err(e) => {
+                info!("I2C write failed with error: {:?}", e);
+                Err("I2C write failed")
+            }
+        }
     }
 
     /// Read data from the camera via I2C
@@ -908,12 +936,33 @@ impl<'a> OV5640Camera<'a> {
         let mut value = [0u8];
 
         // First write the register address we want to read
-        crate::i2c::with_i2c(|i2c| i2c.write(OV5640_SCCB_ADDR_W, &[reg_high, reg_low])).await;
+        let write_result = crate::i2c::with_i2c(|i2c| {
+            i2c.write(OV5640_SCCB_ADDR_W, &[reg_high, reg_low])
+        }).await;
+
+        match write_result {
+            Ok(_) => {},
+            Err(e) => {
+                info!("I2C write for read failed with error: {:?}", e);
+                return Err("I2C write for read failed");
+            }
+        }
 
         // Then read the value from the camera
-        crate::i2c::with_i2c(|i2c| i2c.write_read(OV5640_SCCB_ADDR_R, &[], &mut value)).await;
+        let read_result = crate::i2c::with_i2c(|i2c| {
+            i2c.read(OV5640_SCCB_ADDR_R, &mut value)
+        }).await;
 
-        Ok(value[0])
+        match read_result {
+            Ok(_) => {
+                info!("Register 0x{:04x} read value: 0x{:02x}", reg, value[0]);
+                Ok(value[0])
+            }
+            Err(e) => {
+                info!("I2C read failed with error: {:?}", e);
+                Err("I2C read failed")
+            }
+        }
     }
 
     /// Configure default parameters
@@ -1376,7 +1425,7 @@ impl OV5640Camera<'_> {
             return Err("Auto focus timed out");
         }
 
-        // Step 3: Pause auto focus (maintain lens position)
+        // Step 3: Pause autofocus (maintain lens position)
         // This step is optional as single autofocus stops automatically after completion
         self.write_i2c(0x3022, 0x06).await?; // Pause auto focus
 

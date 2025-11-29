@@ -262,6 +262,60 @@ pub async fn control_strobe_pin(state: bool) -> Result<(), I2cError> {
     .await
 }
 
+/// 控制OV5640摄像头的PWDN引脚
+/// 
+/// PWDN引脚连接到XL9555的P0.4 (OV_PWDN_IO)，用于控制OV5640的电源管理
+/// 
+/// # 参数
+/// * `state` - 引脚状态，true表示高电平（摄像头断电），false表示低电平（摄像头上电）
+pub async fn control_ov_pwdn_pin(state: bool) -> Result<(), I2cError> {
+    info!("Setting OV5640 PWDN pin to: {}", state);
+    i2c::with_i2c(|i2c_ref| {
+        // 读取当前端口0输出状态
+        let mut port0_data = [0u8];
+        i2c_ref.write_read(XL9555_ADDR, &[registers::OUTPUT_PORT_0], &mut port0_data)?;
+        
+        // 根据状态设置PWDN引脚 (P0.4)
+        // io_bits::OV_PWDN_IO = 0x0010，即第4位
+        let new_port0_data = if state {
+            port0_data[0] | 0x10 // 设置P0.4为高电平
+        } else {
+            port0_data[0] & !0x10 // 设置P0.4为低电平
+        };
+
+        // 写回端口0输出
+        i2c_ref.write(XL9555_ADDR, &[registers::OUTPUT_PORT_0, new_port0_data])
+    })
+    .await
+}
+
+/// 控制OV5640摄像头的RESET引脚
+/// 
+/// RESET引脚连接到XL9555的P0.5 (OV_RESET_IO)，用于控制OV5640的复位
+/// 
+/// # 参数
+/// * `state` - 引脚状态，true表示高电平（复位释放），false表示低电平（复位）
+pub async fn control_ov_reset_pin(state: bool) -> Result<(), I2cError> {
+    info!("Setting OV5640 RESET pin to: {}", state);
+    i2c::with_i2c(|i2c_ref| {
+        // 读取当前端口0输出状态
+        let mut port0_data = [0u8];
+        i2c_ref.write_read(XL9555_ADDR, &[registers::OUTPUT_PORT_0], &mut port0_data)?;
+        
+        // 根据状态设置RESET引脚 (P0.5)
+        // io_bits::OV_RESET_IO = 0x0020，即第5位
+        let new_port0_data = if state {
+            port0_data[0] | 0x20 // 设置P0.5为高电平
+        } else {
+            port0_data[0] & !0x20 // 设置P0.5为低电平
+        };
+
+        // 写回端口0输出
+        i2c_ref.write(XL9555_ADDR, &[registers::OUTPUT_PORT_0, new_port0_data])
+    })
+    .await
+}
+
 /// 初始化ATK-MD0240模块
 /// 执行硬件复位序列：RST引脚拉低至少10微秒，然后拉高并延时120毫秒等待复位完成
 pub async fn init_atk_md0240() -> Result<(), I2cError> {
