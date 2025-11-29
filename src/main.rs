@@ -99,13 +99,13 @@ extern crate alloc;
 use defmt::{info, warn};
 use embassy_executor::Spawner;
 use esp_hal::clock::CpuClock;
-use esp_hal::gpio::AnyPin;
 use esp_hal::timer::timg::TimerGroup;
 // 保留以引入panic handler
 #[allow(unused)]
 use {esp_backtrace, esp_println};
 
 mod ap3216c;
+mod backlight;
 mod button;
 mod camera;
 mod console;
@@ -120,7 +120,6 @@ mod spi;
 mod spi_lcd;
 mod wifi;
 mod xl9555;
-mod backlight;
 
 // 创建 esp-idf bootloader 所需的默认应用程序描述符
 // 更多信息请参见: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -145,23 +144,10 @@ async fn main(spawner: Spawner) {
     info!("Embassy initialized!");
 
     // 初始化 LED0 (GPIO1)
-    led::led0_init(peripherals.GPIO1).await;
+    // led::led0_init(peripherals.GPIO1).await;
 
     // 初始化 BOOT 按键 (GPIO0)
     // button::boot_button_init(peripherals.GPIO0).await;
-
-    // 配置 SPI 接口引脚
-    // let sck = peripherals.GPIO12; // SPI 时钟线
-    // let mosi = peripherals.GPIO11; // SPI 主输出从输入线
-    // let miso = peripherals.GPIO13; // SPI 主输入从输出线
-    // let cs = peripherals.GPIO21; // SPI 片选线
-    // let dc = peripherals.GPIO40; // LCD 数据/命令选择线
-
-    // let result = spi::init(peripherals.SPI2, sck, mosi, miso, cs).await;
-    // if result.is_err() {
-    //     warn!("Failed to initialize SPI interface");
-    //     return;
-    // }
 
     // 初始化 WiFi
     let result = wifi::init(peripherals.WIFI).await;
@@ -182,196 +168,214 @@ async fn main(spawner: Spawner) {
 
     // 初始化 RGB LCD
     // 首先配置LCD_CAM外设和DMA通道
-    let lcd_cam = peripherals.LCD_CAM;
-    let dma_channel = peripherals.DMA_CH0;
+    // let lcd_cam = peripherals.LCD_CAM;
+    // let dma_channel = peripherals.DMA_CH0;
 
-    // 配置控制引脚
-    let de = peripherals.GPIO4; // DE (Data Enable)
-    let hsync = peripherals.GPIO5; // HSYNC (Horizontal Sync)
-    let vsync = peripherals.GPIO6; // VSYNC (Vertical Sync)
-    let pclk = peripherals.GPIO7; // PCLK (Pixel Clock)
+    // // 配置控制引脚 (根据正点原子开发板实际连接)
+    // let de = peripherals.GPIO4;    // DE (Data Enable) - 连接到Camera D0
+    // let hsync = peripherals.GPIO5; // HSYNC (Horizontal Sync) - 连接到Camera D1
+    // let vsync = peripherals.GPIO47; // VSYNC (Vertical Sync) - 开发板上的VSYNC引脚
+    // let pclk = peripherals.GPIO45;  // PCLK (Pixel Clock) - 开发板上的PCLK引脚
 
-    // 配置数据引脚
-    let data_pins: [Option<AnyPin>; 16] = [
-        Some(peripherals.GPIO8.into()),  // DATA0 - B0
-        Some(peripherals.GPIO9.into()),  // DATA1 - B1
-        Some(peripherals.GPIO10.into()), // DATA2 - B2
-        Some(peripherals.GPIO11.into()), // DATA3 - B3
-        Some(peripherals.GPIO12.into()), // DATA4 - B4
-        Some(peripherals.GPIO13.into()), // DATA5 - G0
-        Some(peripherals.GPIO14.into()), // DATA6 - G1
-        Some(peripherals.GPIO15.into()), // DATA7 - G2
-        Some(peripherals.GPIO16.into()), // DATA8 - G3
-        Some(peripherals.GPIO17.into()), // DATA9 - G4
-        Some(peripherals.GPIO18.into()), // DATA10 - G5
-        Some(peripherals.GPIO19.into()), // DATA11 - G6
-        Some(peripherals.GPIO20.into()), // DATA12 - G7
-        Some(peripherals.GPIO21.into()), // DATA13 - R0
-        Some(peripherals.GPIO45.into()), // DATA14 - R1
-        Some(peripherals.GPIO46.into()), // DATA15 - R2
-    ];
+    // // 配置数据引脚 (根据正点原子开发板实际连接)
+    // // 注意：这些引脚与Camera共享，但在不同时间使用
+    // let data_pins: [Option<AnyPin>; 16] = [
+    //     Some(peripherals.GPIO4.into()),   // DATA0 - B0 (Camera D0)
+    //     Some(peripherals.GPIO5.into()),   // DATA1 - B1 (Camera D1)
+    //     Some(peripherals.GPIO6.into()),   // DATA2 - B2 (Camera D2)
+    //     Some(peripherals.GPIO7.into()),   // DATA3 - B3 (Camera D3)
+    //     Some(peripherals.GPIO15.into()),  // DATA4 - B4 (Camera D4)
+    //     Some(peripherals.GPIO16.into()),  // DATA5 - G0 (Camera D5)
+    //     Some(peripherals.GPIO17.into()),  // DATA6 - G1 (Camera D6)
+    //     Some(peripherals.GPIO18.into()),  // DATA7 - G2 (Camera D7)
+    //     None,  // DATA8 - G3 (未连接)
+    //     None,  // DATA9 - G4 (未连接)
+    //     None,  // DATA10 - G5 (未连接)
+    //     None,  // DATA11 - G6 (未连接)
+    //     None,  // DATA12 - G7 (未连接)
+    //     None,  // DATA13 - R0 (未连接)
+    //     None,  // DATA14 - R1 (未连接)
+    //     None,  // DATA15 - R2 (未连接)
+    // ];
 
-    // 创建RGB LCD设备实例 (这里使用常见的800x480屏幕ID 0x4384)
-    let rgb_dev = rgb_lcd::RgbLcdDev::new(800, 480, 0x4384);
+    // // 创建RGB LCD设备实例 (这里使用常见的800x480屏幕ID 0x4384)
+    // let rgb_dev = rgb_lcd::RgbLcdDev::new(800, 480, 0x4384);
 
-    // 初始化RGB LCD
-    let mut rgb_lcd = rgb_lcd::RgbLcd::new(
-        lcd_cam,
-        dma_channel,
-        rgb_dev,
-        de,
-        hsync,
-        vsync,
-        pclk,
-        data_pins,
-    );
+    // // 初始化RGB LCD
+    // let mut rgb_lcd = rgb_lcd::RgbLcd::new(
+    //     lcd_cam,
+    //     dma_channel,
+    //     rgb_dev,
+    //     de,
+    //     hsync,
+    //     vsync,
+    //     pclk,
+    //     data_pins,
+    // );
 
-    info!(
-        "RGB LCD initialized with {}x{} resolution",
-        rgb_lcd.width(),
-        rgb_lcd.height()
-    );
+    // info!(
+    //     "RGB LCD initialized with {}x{} resolution",
+    //     rgb_lcd.width(),
+    //     rgb_lcd.height()
+    // );
 
     // 初始化 XL9555 GPIO 扩展芯片
     // 使用 I2C0 接口，SDA 连接 GPIO41，SCL 连接 GPIO42
     i2c::init(peripherals.I2C0, peripherals.GPIO41, peripherals.GPIO42).await;
     let result = xl9555::init().await;
     if result.is_err() {
-        info!("Failed to initialize XL9555 GPIO expander");
-    } else {
-        // 启动按键检测任务
-        let result = spawner.spawn(button::read_keys());
-        if result.is_err() {
-            warn!("Failed to spawn xl9555 task");
+        panic!("Failed to initialize XL9555 GPIO expander");
+    }
+    // 启动按键检测任务
+    let result = spawner.spawn(button::read_keys());
+    if result.is_err() {
+        warn!("Failed to spawn xl9555 task");
+    }
+
+    // 初始化 ATK-MD0240 LCD 模块
+    let result = xl9555::init_atk_md0240().await;
+    if result.is_err() {
+        warn!("Failed to initialize ATK-MD0240 LCD module");
+    }
+    // 开启 LCD 背光
+    // 通过 XL9555 的 P1.3 引脚控制 ATK-MD0240 模块的 PWR 引脚
+    // 注意：现在背光控制由RgbLcd驱动内部管理，不再需要手动调用
+    let result = xl9555::set_lcd_backlight(true).await;
+    if result.is_err() {
+        warn!("Failed to set LCD backlight");
+    }
+
+    // 等待一段时间确保硬件完全准备好
+    embassy_time::Timer::after_millis(100).await;
+
+    // // 开启 RGB LCD 背光（使用新的接口）
+    // let result = rgb_lcd.backlight_on().await;
+    // if result.is_err() {
+    //     warn!("Failed to set RGB LCD backlight");
+    // }
+
+    // 配置 SPI 接口引脚
+    let sck = peripherals.GPIO12; // SPI 时钟线
+    let mosi = peripherals.GPIO11; // SPI 主输出从输入线
+    let miso = peripherals.GPIO13; // SPI 主输入从输出线
+    let cs = peripherals.GPIO21; // SPI 片选线
+    let dc = peripherals.GPIO40; // LCD 数据/命令选择线
+
+    let result = spi::init(peripherals.SPI2, sck, mosi, miso, cs).await;
+    if result.is_err() {
+        panic!("Failed to initialize SPI interface");
+    }
+
+    // 初始化并使用ST7789显示屏
+    let mut guard = spi::SPI.lock().await;
+    let spi_ref = guard.take().unwrap();
+
+    // 创建ST7789驱动实例 (根据实际情况调整分辨率)
+    // 注意: 根据内存信息，ST7789显示屏实际使用的分辨率为240x135
+    let mut display = spi_lcd::ST7789::new(
+        spi_ref,
+        dc,
+        Some(peripherals.GPIO14), // 使用硬件复位
+        240,                      // 宽度
+        320,                      // 高度
+    );
+
+    // 初始化显示屏
+    info!("Initializing ST7789 display...");
+    let init_result = display.init();
+    if init_result.is_err() {
+        warn!(
+            "Failed to initialize ST7789 display: {:?}",
+            init_result.err()
+        );
+    }
+
+    // 等待显示初始化完成
+    embassy_time::Timer::after_millis(100).await;
+
+    // 使用embedded-graphics绘制图形
+    use embedded_graphics::pixelcolor::Rgb565;
+    use embedded_graphics::prelude::*;
+
+    // 清屏为白色背景
+    let _ = display.clear(Rgb565::WHITE);
+
+    // 创建屏幕日志记录器（放在所有图形绘制之后）
+    let display_logger = console::DisplayLogger::new(&mut display);
+
+    // 初始化全局显示日志记录器
+    console::init_global_logger(unsafe { core::mem::transmute(display_logger) });
+
+    // 显示初始日志信息
+    console::log_to_display("system init");
+    console::log_to_display("--------------------");
+    console::log_to_display("wait for key...");
+
+    // 将SPI总线还回，以便其他组件可以使用它
+    let spi = display.release_spi();
+
+    // 初始化摄像头
+    info!("Initializing OV5640 camera...");
+
+    // 创建OV5640配置 - 使用PSRAM优化配置和QVGA分辨率
+    let mut ov5640_config = ov5640::OV5640Config::with_power_scheme_a();
+
+    // 配置摄像头引脚（根据正点原子开发板实际连接设置）
+    ov5640_config.base_config.pins = camera::CameraPins {
+        pin_pwdn: Some(peripherals.GPIO0.into()), // PWDN引脚，通过XL9555的P0.4控制
+        pin_reset: Some(peripherals.GPIO1.into()), // RESET引脚，通过XL9555的P0.5控制
+        pin_xclk: peripherals.GPIO3.into(),       // XCLK引脚，连接模块自带的24MHz晶振
+        pin_sccb_sda: peripherals.GPIO39.into(),  // SCCB SDA引脚 (OV_SDA)
+        pin_sccb_scl: peripherals.GPIO38.into(),  // SCCB SCL引脚 (OV_SCL)
+        pin_d7: peripherals.GPIO18.into(),        // 数据位7
+        pin_d6: peripherals.GPIO17.into(),        // 数据位6
+        pin_d5: peripherals.GPIO16.into(),        // 数据位5
+        pin_d4: peripherals.GPIO15.into(),        // 数据位4
+        pin_d3: peripherals.GPIO7.into(),         // 数据位3
+        pin_d2: peripherals.GPIO6.into(),         // 数据位2
+        pin_d1: peripherals.GPIO5.into(),         // 数据位1
+        pin_d0: peripherals.GPIO4.into(),         // 数据位0
+        pin_vsync: peripherals.GPIO47.into(),     // 垂直同步
+        pin_href: peripherals.GPIO48.into(),      // 行参考 (HREF)
+        pin_pclk: peripherals.GPIO45.into(),      // 像素时钟
+    };
+    ov5640_config.base_config.xclk_freq_hz = 24_000_000; // 设置XCLK频率为24MHz，匹配模块晶振
+    // 使用更小的分辨率以减少内存使用
+    ov5640_config.base_config.frame_size = camera::FrameSize::Qvga; // 320x240
+    ov5640_config.base_config.pixel_format = camera::PixelFormat::Rgb565;
+    ov5640_config.base_config.fb_location = camera::FrameBufferLocation::InPsram;
+    ov5640_config.base_config.fb_count = 1; // 使用单缓冲以减少内存使用
+
+    // 创建OV5640摄像头实例
+    let mut ov5640_camera = ov5640::OV5640Camera::new(ov5640_config);
+
+    // 初始化摄像头
+    match ov5640_camera.init().await {
+        Ok(()) => {
+            info!("OV5640 camera initialized successfully");
+
+            // 测试摄像头性能（使用更少的帧数以减少内存压力）
+            match ov5640_camera.test_performance(2).await {
+                Ok(performance) => {
+                    info!(
+                        "Camera performance test: {} FPS, avg frame size: {} bytes",
+                        performance.fps, performance.avg_size
+                    );
+                }
+                Err(e) => {
+                    warn!("Camera performance test failed: {}", e);
+                }
+            }
+
+            // 启动摄像头显示任务
+            // 注意：SPI LCD的显示任务与RGB LCD不同，需要专门适配
+            // let result = spawner.spawn(camera_display_task(ov5640_camera, rgb_lcd));
+            // if result.is_err() {
+            //     warn!("Failed to spawn camera display task");
+            // }
         }
-
-        // 初始化 ATK-MD0240 LCD 模块
-        let result = xl9555::init_atk_md0240().await;
-        if result.is_err() {
-            warn!("Failed to initialize ATK-MD0240 LCD module");
+        Err(e) => {
+            warn!("Failed to initialize OV5640 camera: {}", e);
         }
-        // 开启 LCD 背光
-        // 通过 XL9555 的 P1.3 引脚控制 ATK-MD0240 模块的 PWR 引脚
-        // 注意：现在背光控制由RgbLcd驱动内部管理，不再需要手动调用
-        // let result = xl9555::set_lcd_backlight(true).await;
-        // if result.is_err() {
-        //     warn!("Failed to set LCD backlight");
-        // }
-
-        // 等待一段时间确保硬件完全准备好
-        embassy_time::Timer::after_millis(100).await;
-        
-        // 开启 RGB LCD 背光（使用新的接口）
-        let result = rgb_lcd.backlight_on().await;
-        if result.is_err() {
-            warn!("Failed to set RGB LCD backlight");
-        }
-
-        // 初始化并使用ST7789显示屏
-        // let mut guard = spi::SPI.lock().await;
-        // let _spi_ref = guard.take().unwrap();
-        //
-        // // 创建ST7789驱动实例 (根据实际情况调整分辨率)
-        // // 注意: 根据内存信息，ST7789显示屏实际使用的分辨率为240x135
-        // let mut display = spi_lcd::ST7789::new(
-        //     spi_ref,
-        //     dc,
-        //     Some(peripherals.GPIO14), // 使用硬件复位
-        //     240,                      // 宽度
-        //     320,                      // 高度
-        // );
-        //
-        // // 初始化显示屏
-        // info!("Initializing ST7789 display...");
-        // let init_result = display.init();
-        // if init_result.is_err() {
-        //     warn!(
-        //         "Failed to initialize ST7789 display: {:?}",
-        //         init_result.err()
-        //     );
-        // }
-        //
-        // // 等待显示初始化完成
-        // embassy_time::Timer::after_millis(100).await;
-        //
-        // // 使用embedded-graphics绘制图形
-        // use embedded_graphics::pixelcolor::Rgb565;
-        // use embedded_graphics::prelude::*;
-        //
-        // // 清屏为白色背景
-        // let _ = display.clear(Rgb565::WHITE);
-        //
-        // // 创建屏幕日志记录器（放在所有图形绘制之后）
-        // let display_logger = console::DisplayLogger::new(&mut display);
-        //
-        // // 初始化全局显示日志记录器
-        // console::init_global_logger(unsafe { core::mem::transmute(display_logger) });
-        //
-        // // 显示初始日志信息
-        // console::log_to_display("system init");
-        // console::log_to_display("--------------------");
-        // console::log_to_display("wait for key...");
-        //
-        // // 将SPI总线还回，以便其他组件可以使用它
-        // let spi = display.release_spi();
-        // guard.replace(spi);
-
-        // 初始化OV5640摄像头
-        // info!("Initializing OV5640 camera...");
-        //
-        // // 创建OV5640配置 - 使用PSRAM优化配置和QVGA分辨率
-        // let mut ov5640_config = ov5640::OV5640Config::with_power_scheme_a();
-        //
-        // // 配置摄像头引脚（根据实际硬件连接设置）
-        // ov5640_config.base_config.pins = camera::CameraPins {
-        //     pin_pwdn: None,  // 如果有PWDN引脚，请设置为Some(peripherals.GPIOXX.into())
-        //     pin_reset: None, // 如果有RESET引脚，请设置为Some(peripherals.GPIOXX.into())
-        //     pin_xclk: peripherals.GPIO3.into(), // XCLK引脚
-        //     pin_sccb_sda: peripherals.GPIO4.into(), // SCCB SDA引脚
-        //     pin_sccb_scl: peripherals.GPIO5.into(), // SCCB SCL引脚
-        //     pin_d7: peripherals.GPIO39.into(), // 数据位7
-        //     pin_d6: peripherals.GPIO38.into(), // 数据位6
-        //     pin_d5: peripherals.GPIO37.into(), // 数据位5
-        //     pin_d4: peripherals.GPIO36.into(), // 数据位4
-        //     pin_d3: peripherals.GPIO9.into(), // 数据位3 (GPIO9未被使用)
-        //     pin_d2: peripherals.GPIO10.into(), // 数据位2 (GPIO10未被使用)
-        //     pin_d1: peripherals.GPIO15.into(), // 数据位1 (GPIO15未被使用)
-        //     pin_d0: peripherals.GPIO16.into(), // 数据位0 (GPIO16未被使用)
-        //     pin_vsync: peripherals.GPIO6.into(), // 垂直同步
-        //     pin_href: peripherals.GPIO7.into(), // 行参考
-        //     pin_pclk: peripherals.GPIO8.into(), // 像素时钟
-        // };
-        // ov5640_config.base_config.xclk_freq_hz = 20_000_000; // 设置XCLK频率为20MHz
-        // // 使用更小的分辨率以减少内存使用
-        // ov5640_config.base_config.frame_size = camera::FrameSize::Qvga; // 320x240
-        // ov5640_config.base_config.pixel_format = camera::PixelFormat::Rgb565;
-        // ov5640_config.base_config.fb_location = camera::FrameBufferLocation::InPsram;
-        // ov5640_config.base_config.fb_count = 1; // 使用单缓冲以减少内存使用
-        //
-        // // 创建OV5640摄像头实例
-        // let mut ov5640_camera = ov5640::OV5640Camera::new(ov5640_config);
-        //
-        // // 初始化摄像头
-        // match ov5640_camera.init().await {
-        //     Ok(()) => {
-        //         info!("OV5640 camera initialized successfully");
-        //
-        //         // 测试摄像头性能（使用更少的帧数以减少内存压力）
-        //         match ov5640_camera.test_performance(2).await {
-        //             Ok(performance) => {
-        //                 info!(
-        //                     "Camera performance test: {} FPS, avg frame size: {} bytes",
-        //                     performance.fps, performance.avg_size
-        //                 );
-        //             }
-        //             Err(e) => {
-        //                 warn!("Camera performance test failed: {}", e);
-        //             }
-        //         }
-        //     }
-        //     Err(e) => {
-        //         warn!("Failed to initialize OV5640 camera: {}", e);
-        //     }
-        // }
     }
 }

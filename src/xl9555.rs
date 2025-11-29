@@ -178,7 +178,10 @@ pub fn set_spi_lcd_power_state(i2c_ref: &mut I2c<Blocking>, state: bool) -> Resu
 /// # 参数
 /// * `i2c_ref` - I2C 接口引用
 /// * `state` - 背光状态，true 表示开启（高电平），false 表示关闭（低电平）
-pub fn set_rgb_lcd_backlight_state(i2c_ref: &mut I2c<Blocking>, state: bool) -> Result<(), I2cError> {
+pub fn set_rgb_lcd_backlight_state(
+    i2c_ref: &mut I2c<Blocking>,
+    state: bool,
+) -> Result<(), I2cError> {
     // 读取当前端口1输出状态
     let mut port1_data = [0u8];
     i2c_ref.write_read(XL9555_ADDR, &[registers::OUTPUT_PORT_1], &mut port1_data)?;
@@ -228,7 +231,7 @@ pub async fn spi_lcd_reset(state: bool) -> Result<(), I2cError> {
 /// # 参数
 /// * `state` - 背光状态，true 表示开启背光，false 表示关闭背光
 pub async fn set_lcd_backlight(state: bool) -> Result<(), I2cError> {
-    i2c::with_i2c(|i2c_ref| set_rgb_lcd_backlight_state(i2c_ref, state)).await
+    i2c::with_i2c(|i2c_ref| set_spi_lcd_reset_state(i2c_ref, state)).await
 }
 
 /// 初始化ATK-MD0240模块

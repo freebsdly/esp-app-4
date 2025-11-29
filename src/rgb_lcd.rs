@@ -500,6 +500,57 @@ impl<'d> RgbLcd<'d> {
     pub async fn backlight_off(&mut self) -> Result<(), esp_hal::i2c::master::Error> {
         self.backlight.set_backlight(0).await
     }
+
+    /// Draw framebuffer data to the LCD display
+    /// 
+    /// This function takes framebuffer data and displays it on the LCD.
+    /// The data should be in RGB565 format.
+    /// 
+    /// # Arguments
+    /// * `data` - Slice of RGB565 pixel data to display
+    /// 
+    /// # Returns
+    /// * `Ok(())` - Successfully displayed the framebuffer
+    /// * `Err(...)` - Failed to display the framebuffer
+    pub async fn draw_framebuffer(&mut self, data: &[u8]) -> Result<(), esp_hal::dma::DmaError> {
+        // Calculate required buffer size (2 bytes per pixel for RGB565)
+        let required_size = (self.dev.width as usize) * (self.dev.height as usize) * 2;
+        
+        // Ensure we have enough data
+        if data.len() < required_size {
+            // If we don't have enough data, we could either return an error or pad with black
+            // For now, let's just use what we have and it will display partially
+            defmt::warn!("Framebuffer data size ({}) is less than required ({}), displaying partial image", data.len(), required_size);
+        }
+
+        // Create a DMA buffer
+        let buffer_size = data.len().min(required_size).next_multiple_of(4);
+        // 创建静态描述符数组和缓冲区
+        let descriptors = unsafe {
+            static mut DESCRIPTORS: [esp_hal::dma::DmaDescriptor; 32] = [esp_hal::dma::DmaDescriptor::EMPTY; 32];
+            &mut DESCRIPTORS[..]
+        };
+        
+        let buffer = unsafe {
+            static mut BUFFER: [u8; 800 * 480 * 2] = [0; 800 * 480 * 2]; // 最大支持800*480屏幕
+            &mut BUFFER[..buffer_size]
+        };
+        
+        let mut tx_buf = DmaTxBuf::new(descriptors, buffer).unwrap();
+        
+        // Copy data to buffer
+        let buffer_slice = tx_buf.as_mut_slice();
+        let copy_size = buffer_slice.len().min(data.len());
+        buffer_slice[..copy_size].copy_from_slice(&data[..copy_size]);
+        
+        // Fill remaining buffer with black (0x0000 in RGB565)
+        if copy_size < buffer_slice.len() {
+            buffer_slice[copy_size..].fill(0x00);
+        }
+        
+        // Send frame to display
+        self.send_frame(tx_buf)
+    }
 }
 
 impl RgbLcdDev {

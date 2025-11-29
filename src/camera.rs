@@ -33,6 +33,30 @@ pub struct CameraPins<'a> {
     pub pin_pclk: AnyPin<'a>,
 }
 
+impl Default for CameraPins<'_> {
+    /// Creates a default camera pin configuration
+    fn default() -> Self {
+        Self {
+            pin_pwdn: None,
+            pin_reset: None,
+            pin_xclk: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
+            pin_sccb_sda: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
+            pin_sccb_scl: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
+            pin_d7: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
+            pin_d6: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
+            pin_d5: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
+            pin_d4: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
+            pin_d3: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
+            pin_d2: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
+            pin_d1: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
+            pin_d0: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
+            pin_vsync: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
+            pin_href: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
+            pin_pclk: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
+        }
+    }
+}
+
 /// Camera configuration structure
 #[derive(Debug)]
 pub struct CameraConfig<'a> {
@@ -549,6 +573,46 @@ impl CameraFrame {
     /// Returns a reference to the frame data buffer.
     pub fn data(&self) -> &[u8] {
         &self.data
+    }
+    
+    /// Check if the frame contains JPEG data
+    ///
+    /// Returns true if the frame format is JPEG.
+    pub fn is_jpeg(&self) -> bool {
+        matches!(self.format, PixelFormat::Jpeg)
+    }
+    
+    /// Get JPEG data from frame
+    ///
+    /// If the frame contains JPEG data, returns the JPEG data slice
+    /// (starting with 0xFFD8 and ending with 0xFFD9).
+    /// For JPEG data, the format is:
+    /// - Starts with 0xFF, 0xD8
+    /// - Ends with 0xFF, 0xD9
+    /// - Data before 0xFFD8 or after 0xFFD9 should be ignored
+    pub fn jpeg_data(&self) -> Option<&[u8]> {
+        if !self.is_jpeg() {
+            return None;
+        }
+        
+        let data = &self.data;
+        if data.len() < 2 {
+            return None;
+        }
+        
+        // Find JPEG start marker (0xFFD8)
+        let start_index = data.windows(2).position(|w| w == [0xFF, 0xD8])?;
+        
+        // Find JPEG end marker (0xFFD9)
+        let end_index = data.windows(2).rposition(|w| w == [0xFF, 0xD9])?;
+        
+        // Make sure end marker comes after start marker
+        if end_index <= start_index {
+            return None;
+        }
+        
+        // Return the JPEG data including markers
+        Some(&data[start_index..end_index+2])
     }
 }
 
