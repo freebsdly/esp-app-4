@@ -613,51 +613,46 @@ impl LEDFlashController {
     async fn write_i2c(&mut self, reg: u16, value: u8) -> Result<(), &'static str> {
         info!("Writing to register 0x{:04x}: 0x{:02x}", reg, value);
         
-        // 使用SCCB接口写入OV5640寄存器
-        // OV5640的SCCB地址通常是0x78 (写)
-        const OV5640_SCCB_ADDR: u8 = 0x78;
+        // 使用统一的I2C接口写入OV5640寄存器
+        // OV5640的SCCB地址是0x3C (7位地址格式)
+        const OV5640_SCCB_ADDR: u8 = 0x3C;
         
-        // 通过I2C总线写入数据 [寄存器高字节, 寄存器低字节, 值]
-        let data = [((reg >> 8) as u8), (reg & 0xFF) as u8, value];
+        // 使用统一的I2C写函数确保正确的寄存器地址顺序
+        let result = crate::i2c::write_register(OV5640_SCCB_ADDR, reg, value).await;
         
-        // 使用现有的I2C接口
-        if let Err(_) = crate::i2c::with_i2c(|i2c| {
-            i2c.write(OV5640_SCCB_ADDR, &data)
-        }).await {
-            return Err("Failed to write to OV5640 register");
+        match result {
+            Ok(_) => {
+                info!("I2C write successful");
+                Ok(())
+            }
+            Err(e) => {
+                info!("I2C write failed with error: {:?}", e);
+                Err("Failed to write to OV5640 register")
+            }
         }
-        
-        Ok(())
     }
 
     /// 读取OV5640寄存器
     async fn read_i2c(&mut self, reg: u16) -> Result<u8, &'static str> {
         info!("Reading from register 0x{:04x}", reg);
         
-        // 使用SCCB接口读取OV5640寄存器
-        // OV5640的SCCB地址通常是0x78 (写) 或 0x79 (读)
-        const OV5640_SCCB_ADDR_W: u8 = 0x78;
-        const OV5640_SCCB_ADDR_R: u8 = 0x79;
+        // 使用统一的I2C接口读取OV5640寄存器
+        // OV5640的SCCB地址是0x3C (7位地址格式)
+        const OV5640_SCCB_ADDR: u8 = 0x3C;
         
-        let reg_high = (reg >> 8) as u8;
-        let reg_low = (reg & 0xFF) as u8;
+        // 使用统一的I2C读函数确保正确的操作顺序
+        let result = crate::i2c::read_register(OV5640_SCCB_ADDR, reg).await;
         
-        // 首先写入要读取的寄存器地址
-        if let Err(_) = crate::i2c::with_i2c(|i2c| {
-            i2c.write(OV5640_SCCB_ADDR_W, &[reg_high, reg_low])
-        }).await {
-            return Err("Failed to set register address for reading");
+        match result {
+            Ok(value) => {
+                info!("Register 0x{:04x} read value: 0x{:02x}", reg, value);
+                Ok(value)
+            }
+            Err(e) => {
+                info!("I2C read failed with error: {:?}", e);
+                Err("Failed to read from OV5640 register")
+            }
         }
-        
-        // 然后读取寄存器的值
-        let mut value = [0u8];
-        if let Err(_) = crate::i2c::with_i2c(|i2c| {
-            i2c.write_read(OV5640_SCCB_ADDR_R, &[], &mut value)
-        }).await {
-            return Err("Failed to read from OV5640 register");
-        }
-        
-        Ok(value[0])
     }
 }
 

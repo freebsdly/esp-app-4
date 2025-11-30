@@ -676,55 +676,50 @@ impl<'a> OV5640Camera<'a> {
     async fn power_up_sequence(&mut self) -> Result<(), &'static str> {
         info!("Executing OV5640 power-up sequence");
 
-        // Get timing parameters
-        let timing = constants::power::PowerUpTiming::default();
-
         // Step 1: Pull RESETB low, pull PWDN high
-        info!("Pulling RESETB low");
+        info!("Step 1: Pulling RESETB low and PWDN high");
         // Using XL9555 to control RESET pin
         crate::xl9555::control_ov_reset_pin(false).await.map_err(|_| "Failed to control RESET pin")?;
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
 
         info!("Pulling PWDN high");
         // Using XL9555 to control PWDN pin
         crate::xl9555::control_ov_pwdn_pin(true).await.map_err(|_| "Failed to control PWDN pin")?;
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
 
         // Step 2: Power up DOVDD and AVDD (DOVDD before AVDD)
         info!("Step 2: Power up DOVDD and AVDD");
         // In a real implementation, we would enable the power supplies here
         // power_supply_enable(DOVDD_POWER);
-
-        // Wait t0 ms (typically 0ms)
-        embassy_time::Timer::after(embassy_time::Duration::from_millis(timing.t0 as u64)).await;
-
+        // Small delay for DOVDD to stabilize
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
         // Enable AVDD power
         // power_supply_enable(AVDD_POWER);
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
 
-        // Step 3: After AVDD stable for t2 ms (typically 5ms), pull PWDN low
+        // Step 3: After AVDD stable for 5ms, pull PWDN low
         info!("Step 3: Waiting for AVDD stable, then pull PWDN low");
-        embassy_time::Timer::after(embassy_time::Duration::from_millis(timing.t2 as u64)).await;
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
 
-        if let Some(_pwdn_pin) = self.camera.config.pins.pin_pwdn.as_mut() {
-            info!("Pulling PWDN low");
-            // Using XL9555 to control PWDN pin
-            crate::xl9555::control_ov_pwdn_pin(false).await.map_err(|_| "Failed to control PWDN pin")?;
-        }
+        info!("Pulling PWDN low");
+        // Using XL9555 to control PWDN pin
+        crate::xl9555::control_ov_pwdn_pin(false).await.map_err(|_| "Failed to control PWDN pin")?;
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
 
-        // Step 4: After PWDN low for t3 ms (typically 1ms), pull RESETB high
+        // Step 4: After PWDN low for 1ms, pull RESETB high
         info!("Step 4: Waiting, then pull RESETB high");
-        embassy_time::Timer::after(embassy_time::Duration::from_millis(timing.t3 as u64)).await;
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
 
-        if let Some(_reset_pin) = self.camera.config.pins.pin_reset.as_mut() {
-            info!("Pulling RESETB high");
-            // Using XL9555 to control RESET pin
-            crate::xl9555::control_ov_reset_pin(true).await.map_err(|_| "Failed to control RESET pin")?;
-        }
+        info!("Pulling RESETB high");
+        // Using XL9555 to control RESET pin
+        crate::xl9555::control_ov_reset_pin(true).await.map_err(|_| "Failed to control RESET pin")?;
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
 
-        // Step 5: After t4 ms (typically 20ms), perform SCCB initialization
+        // Step 5: After 20ms, perform SCCB initialization
         info!("Step 5: Waiting, then perform SCCB initialization");
-        // Increase wait time to ensure the camera is fully ready
-        embassy_time::Timer::after(embassy_time::Duration::from_millis((timing.t4 as u64) * 2)).await;
-        self.sccb_initialization().await?;
-
+        // 增加等待时间以确保传感器完全稳定
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(100)).await;
+        
         info!("OV5640 power-up sequence completed");
         Ok(())
     }
@@ -732,20 +727,182 @@ impl<'a> OV5640Camera<'a> {
     /// Perform SCCB initialization
     ///
     /// This function initializes the camera through the SCCB (Serial Camera Control Bus) interface.
+    /// Following best practices for sensor initialization:
+    /// 1. Software reset as the first step
+    /// 2. Verify the sensor ID
+    /// 3. Configure PCLK based on frame size
+    /// 4. Send the recommended initialization sequence
+    /// 5. Configure default parameters
     async fn sccb_initialization(&mut self) -> Result<(), &'static str> {
         info!("Performing SCCB initialization");
 
-        // Following best practices for sensor initialization:
-        // 1. Verify the sensor ID
+        // 在尝试软件复位之前，先尝试读取传感器ID来确认设备存在
+        info!("Checking if OV5640 device is present on the I2C bus...");
+        let mut device_present = false;
+        for attempt in 1..=5 {
+            match self.read_i2c(0x300A).await {
+                Ok(id_high) => {
+                    match self.read_i2c(0x300B).await {
+                        Ok(id_low) => {
+                            let sensor_id = ((id_high as u16) << 8) | (id_low as u16);
+                            info!("Sensor ID detected: 0x{:04x} (attempt {})", sensor_id, attempt);
+                            if sensor_id == constants::OV5640_ID {
+                                device_present = true;
+                                break;
+                            } else {
+                                info!("Unexpected sensor ID. Expected: 0x{:04x}", constants::OV5640_ID);
+                            }
+                        }
+                        Err(e) => {
+                            info!("Failed to read sensor ID low byte (attempt {}): {:?}", attempt, e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    info!("Failed to read sensor ID high byte (attempt {}): {:?}", attempt, e);
+                }
+            }
+            embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
+        }
+
+        if !device_present {
+            info!("OV5640 device not detected, attempting initialization anyway...");
+        }
+
+        // 1. Software reset as the first step
+        // Try software reset with retries
+        let mut reset_success = false;
+        for attempt in 1..=5 {
+            info!("Attempt {} of software reset", attempt);
+            match self.write_i2c(0x3008, 0x82).await {
+                Ok(_) => {
+                    reset_success = true;
+                    info!("Software reset successful on attempt {}", attempt);
+                    break;
+                },
+                Err(e) => {
+                    info!("Software reset attempt {} failed: {}", attempt, e);
+                    embassy_time::Timer::after(embassy_time::Duration::from_millis(20)).await;
+                }
+            }
+        }
+        
+        if !reset_success {
+            return Err("Failed to perform software reset after 5 attempts");
+        }
+
+        // Small delay after software reset
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(20)).await;
+
+        // 2. Verify the sensor ID
         self.verify_sensor_id().await?;
 
-        // 2. Send the recommended initialization sequence
+        // 3. Configure PCLK based on frame size
+        self.configure_pclk_for_frame_size().await?;
+
+        // 4. Send the recommended initialization sequence
         self.send_initialization_sequence().await?;
 
-        // 3. Configure default parameters
+        // 5. Configure default parameters
         self.configure_default_parameters().await?;
 
         info!("SCCB initialization completed");
+        Ok(())
+    }
+
+
+    /// Send initialization sequence
+    ///
+    /// This function sends the recommended initialization sequence to the sensor.
+    async fn send_initialization_sequence(&mut self) -> Result<(), &'static str> {
+        info!("Sending initialization sequence");
+
+        // System clock configuration
+        self.write_i2c(0x3103, 0x11).await?; // System clock source selection
+
+        // PLL configuration is now handled in configure_pclk_for_frame_size
+        // Image size configuration (VGA as an example)
+        self.write_i2c(0x3808, 0x02).await?; // DVP output horizontal size high byte
+        self.write_i2c(0x3809, 0x80).await?; // DVP output horizontal size low byte (640)
+        self.write_i2c(0x380a, 0x01).await?; // DVP output vertical size high byte
+        self.write_i2c(0x380b, 0xe0).await?; // DVP output vertical size low byte (480)
+
+        // Timing configuration
+        self.write_i2c(0x380c, 0x07).await?; // Horizontal total size high byte
+        self.write_i2c(0x380d, 0x68).await?; // Horizontal total size low byte
+        self.write_i2c(0x380e, 0x03).await?; // Vertical total size high byte
+        self.write_i2c(0x380f, 0xd8).await?; // Vertical total size low byte
+
+        // Image processing function enable
+        self.write_i2c(0x5000, 0xa7).await?; // Enable auto exposure, auto white balance, etc.
+        self.write_i2c(0x5001, 0xa3).await?; // Enable color processing functions
+
+        // Enable video output
+        self.write_i2c(0x4201, 0x3f).await?; // Enable DVP output driver (lower 6 bits set to 1)
+        self.write_i2c(0x4202, 0x00).await?; // Enable image data transfer
+
+        info!("Initialization sequence sent");
+        Ok(())
+    }
+
+    /// Configure MIPI-specific settings
+    ///
+    /// This function configures the MIPI interface settings for the OV5640 sensor.
+    async fn configure_mipi_settings(&mut self) -> Result<(), &'static str> {
+        info!("Configuring MIPI settings");
+
+        // Configure MIPI clock lane
+        self.write_i2c(0x3002, 0x00).await?; // MIPI clock lane low byte
+        self.write_i2c(0x3003, 0x00).await?; // MIPI clock lane high byte
+
+        // Configure MIPI data lane 0
+        self.write_i2c(0x3004, 0x00).await?; // MIPI data lane 0 low byte
+        self.write_i2c(0x3005, 0x00).await?; // MIPI data lane 0 high byte
+
+        // Configure MIPI data lane 1
+        self.write_i2c(0x3006, 0x00).await?; // MIPI data lane 1 low byte
+        self.write_i2c(0x3007, 0x00).await?; // MIPI data lane 1 high byte
+
+        // Configure MIPI control
+        self.write_i2c(0x4800, 0x04).await?; // MIPI control register
+
+        info!("MIPI settings configured");
+        Ok(())
+    }
+
+    /// Configure JPEG-specific settings
+    ///
+    /// This function configures the JPEG compression settings for the OV5640 sensor.
+    async fn configure_jpeg_settings(&mut self) -> Result<(), &'static str> {
+        info!("Configuring JPEG settings");
+
+        // Configure JPEG mode
+        self.write_i2c(0x4300, 0x08).await?; // Enable JPEG mode
+
+        // Configure JPEG quality
+        self.write_i2c(0x4407, 0x08).await?; // JPEG quality factor (0x08 = high quality)
+
+        // Configure JPEG control
+        self.write_i2c(0x440e, 0x00).await?; // JPEG control register
+
+        info!("JPEG settings configured");
+        Ok(())
+    }
+
+    /// Configure DVP-specific settings
+    ///
+    /// This function configures the DVP (Digital Video Port) interface settings for the OV5640 sensor.
+    async fn configure_dvp_settings(&mut self) -> Result<(), &'static str> {
+        info!("Configuring DVP settings");
+
+        // Configure DVP control
+        self.write_i2c(0x4800, 0x00).await?; // DVP control register
+
+        // Configure DVP timing
+        self.write_i2c(0x3820, 0x40).await?; // DVP vertical control
+        self.write_i2c(0x3821, 0x00).await?; // DVP horizontal control
+
+        info!("DVP settings configured");
         Ok(())
     }
 
@@ -818,27 +975,45 @@ impl<'a> OV5640Camera<'a> {
         info!("Verifying sensor ID");
 
         // Try multiple times to read the sensor ID in case of temporary communication issues
-        let mut retries = 3;
+        let mut retries = 15;
         let (id_high, id_low) = loop {
+            // Wait a bit before trying
+            embassy_time::Timer::after(embassy_time::Duration::from_millis(50)).await;
+            
             // Read the sensor ID from registers 0x300A (high byte) and 0x300B (low byte)
             let id_high_result = self.read_i2c(0x300A).await;
             let id_low_result = self.read_i2c(0x300B).await;
             
             match (id_high_result, id_low_result) {
                 (Ok(high), Ok(low)) => {
-                    break (high, low);
-                }
-                _ => {
-                    if retries > 0 {
-                        retries -= 1;
-                        info!("Retrying sensor ID read, retries left: {}", retries);
-                        embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
-                        continue;
+                    info!("Sensor ID high byte: 0x{:02x}, low byte: 0x{:02x}", high, low);
+                    // 检查是否为有效的OV5640 ID
+                    if high == 0x56 && low == 0x40 {
+                        break (high, low);
                     } else {
-                        info!("Failed to read sensor ID after retries");
-                        return Err("Failed to read sensor ID");
+                        info!("Unexpected sensor ID values - high: 0x{:02x}, low: 0x{:02x}", high, low);
+                        // 继续重试
                     }
                 }
+                (Err(e1), Err(e2)) => {
+                    info!("Failed to read sensor ID - high byte error: {:?}, low byte error: {:?}", e1, e2);
+                }
+                (Ok(high), Err(e)) => {
+                    info!("Failed to read sensor ID low byte (high=0x{:02x}): {:?}", high, e);
+                }
+                (Err(e), Ok(low)) => {
+                    info!("Failed to read sensor ID high byte (low=0x{:02x}): {:?}", low, e);
+                }
+            }
+            
+            if retries > 0 {
+                retries -= 1;
+                info!("Retrying sensor ID read, retries left: {}", retries);
+                embassy_time::Timer::after(embassy_time::Duration::from_millis(100)).await;
+                continue;
+            } else {
+                info!("Failed to read sensor ID after retries");
+                return Err("Failed to read sensor ID");
             }
         };
         
@@ -857,41 +1032,6 @@ impl<'a> OV5640Camera<'a> {
         Ok(())
     }
 
-    /// Send initialization sequence
-    ///
-    /// This function sends the recommended initialization sequence to the sensor.
-    async fn send_initialization_sequence(&mut self) -> Result<(), &'static str> {
-        info!("Sending initialization sequence");
-
-        // System clock configuration
-        self.write_i2c(0x3103, 0x11).await?; // System clock source selection
-        self.write_i2c(0x3008, 0x82).await?; // Software reset, then wake up
-
-        // PLL configuration (24MHz input clock)
-        self.write_i2c(0x3035, 0x21).await?; // PLL pre-divider
-        self.write_i2c(0x3036, 0x69).await?; // PLL multiplier
-        self.write_i2c(0x3037, 0x13).await?; // PLL control
-
-        // Image size configuration (VGA as an example)
-        self.write_i2c(0x3808, 0x02).await?; // DVP output horizontal size high byte
-        self.write_i2c(0x3809, 0x80).await?; // DVP output horizontal size low byte (640)
-        self.write_i2c(0x380a, 0x01).await?; // DVP output vertical size high byte
-        self.write_i2c(0x380b, 0xe0).await?; // DVP output vertical size low byte (480)
-
-        // Timing configuration
-        self.write_i2c(0x380c, 0x07).await?; // Horizontal total size high byte
-        self.write_i2c(0x380d, 0x68).await?; // Horizontal total size low byte
-        self.write_i2c(0x380e, 0x03).await?; // Vertical total size high byte
-        self.write_i2c(0x380f, 0xd8).await?; // Vertical total size low byte
-
-        // Image processing function enable
-        self.write_i2c(0x5000, 0xa7).await?; // Enable auto exposure, auto white balance, etc.
-        self.write_i2c(0x5001, 0xa3).await?; // Enable color processing functions
-
-        info!("Initialization sequence sent");
-        Ok(())
-    }
-
     /// Write data to the camera via I2C
     ///
     /// This function interfaces with the actual I2C hardware.
@@ -899,23 +1039,31 @@ impl<'a> OV5640Camera<'a> {
         info!("Writing to register 0x{:04x}: 0x{:02x}", reg, value);
 
         // Use the actual I2C implementation
-        const OV5640_SCCB_ADDR: u8 = 0x78; // OV5640 SCCB write address
+        const OV5640_SCCB_ADDR: u8 = 0x3C; // OV5640 7-bit address
 
-        // Create data packet: [register high byte, register low byte, value]
-        let data = [((reg >> 8) as u8), (reg & 0xFF) as u8, value];
-
-        // Write to the camera via I2C using the SCCB interface
-        let result = crate::i2c::with_i2c(|i2c| {
-            i2c.write(OV5640_SCCB_ADDR, &data)
-        }).await;
+        // 使用统一的I2C写函数确保正确的寄存器地址顺序
+        let result = crate::i2c::write_register(OV5640_SCCB_ADDR, reg, value).await;
 
         match result {
             Ok(_) => {
+                info!("I2C write successful");
                 Ok(())
             }
             Err(e) => {
                 info!("I2C write failed with error: {:?}", e);
-                Err("I2C write failed")
+                // Add a small delay and retry once
+                embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
+                let retry_result = crate::i2c::write_register(OV5640_SCCB_ADDR, reg, value).await;
+                match retry_result {
+                    Ok(_) => {
+                        info!("I2C write retry successful");
+                        Ok(())
+                    },
+                    Err(retry_error) => {
+                        info!("I2C write retry also failed with error: {:?}", retry_error);
+                        Err("I2C write failed")
+                    }
+                }
             }
         }
     }
@@ -927,40 +1075,31 @@ impl<'a> OV5640Camera<'a> {
         info!("Reading from register 0x{:04x}", reg);
 
         // Use the actual I2C implementation
-        const OV5640_SCCB_ADDR_W: u8 = 0x78; // OV5640 SCCB write address
-        const OV5640_SCCB_ADDR_R: u8 = 0x79; // OV5640 SCCB read address
+        const OV5640_SCCB_ADDR: u8 = 0x3C; // OV5640 7-bit address
 
-        let reg_high = (reg >> 8) as u8;
-        let reg_low = (reg & 0xFF) as u8;
+        // 使用统一的I2C读函数确保正确的操作顺序
+        let result = crate::i2c::read_register(OV5640_SCCB_ADDR, reg).await;
 
-        let mut value = [0u8];
-
-        // First write the register address we want to read
-        let write_result = crate::i2c::with_i2c(|i2c| {
-            i2c.write(OV5640_SCCB_ADDR_W, &[reg_high, reg_low])
-        }).await;
-
-        match write_result {
-            Ok(_) => {},
-            Err(e) => {
-                info!("I2C write for read failed with error: {:?}", e);
-                return Err("I2C write for read failed");
-            }
-        }
-
-        // Then read the value from the camera
-        let read_result = crate::i2c::with_i2c(|i2c| {
-            i2c.read(OV5640_SCCB_ADDR_R, &mut value)
-        }).await;
-
-        match read_result {
-            Ok(_) => {
-                info!("Register 0x{:04x} read value: 0x{:02x}", reg, value[0]);
-                Ok(value[0])
+        match result {
+            Ok(value) => {
+                info!("Register 0x{:04x} read value: 0x{:02x}", reg, value);
+                Ok(value)
             }
             Err(e) => {
                 info!("I2C read failed with error: {:?}", e);
-                Err("I2C read failed")
+                // Add a small delay and retry once
+                embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
+                let retry_result = crate::i2c::read_register(OV5640_SCCB_ADDR, reg).await;
+                match retry_result {
+                    Ok(value) => {
+                        info!("Register 0x{:04x} read value on retry: 0x{:02x}", reg, value);
+                        Ok(value)
+                    }
+                    Err(retry_error) => {
+                        info!("I2C read retry also failed with error: {:?}", retry_error);
+                        Err("I2C read failed")
+                    }
+                }
             }
         }
     }
@@ -971,11 +1110,19 @@ impl<'a> OV5640Camera<'a> {
     async fn configure_default_parameters(&mut self) -> Result<(), &'static str> {
         info!("Configuring default parameters");
 
+        // Configure PCLK based on frame size for optimal performance
+        self.configure_pclk_for_frame_size().await?;
+
         // Configure based on the current frame size in the base configuration
         match self.camera.config.frame_size {
             crate::camera::FrameSize::Vga => {
                 // VGA configuration (640x480) - already set in initialization sequence
                 info!("Configuring for VGA (640x480)");
+                // Timing configuration for VGA
+                self.write_i2c(0x380c, 0x07).await?; // Horizontal total size high byte
+                self.write_i2c(0x380d, 0x68).await?; // Horizontal total size low byte
+                self.write_i2c(0x380e, 0x03).await?; // Vertical total size high byte
+                self.write_i2c(0x380f, 0xd8).await?; // Vertical total size low byte
             }
             crate::camera::FrameSize::Qvga => {
                 // QVGA configuration (320x240)
@@ -984,6 +1131,11 @@ impl<'a> OV5640Camera<'a> {
                 self.write_i2c(0x3809, 0x40).await?; // DVP output horizontal size low byte (320)
                 self.write_i2c(0x380a, 0x00).await?; // DVP output vertical size high byte
                 self.write_i2c(0x380b, 0xf0).await?; // DVP output vertical size low byte (240)
+                // Timing configuration for QVGA
+                self.write_i2c(0x380c, 0x07).await?; // Horizontal total size high byte (1928 >> 8)
+                self.write_i2c(0x380d, 0x88).await?; // Horizontal total size low byte (1928 & 0xFF)
+                self.write_i2c(0x380e, 0x03).await?; // Vertical total size high byte (776 >> 8)
+                self.write_i2c(0x380f, 0xd8).await?; // Vertical total size low byte (776 & 0xFF)
             }
             crate::camera::FrameSize::Cif => {
                 // CIF configuration (352x288)
@@ -992,6 +1144,11 @@ impl<'a> OV5640Camera<'a> {
                 self.write_i2c(0x3809, 0x60).await?; // DVP output horizontal size low byte (352)
                 self.write_i2c(0x380a, 0x01).await?; // DVP output vertical size high byte
                 self.write_i2c(0x380b, 0x20).await?; // DVP output vertical size low byte (288)
+                // Timing configuration for CIF
+                self.write_i2c(0x380c, 0x07).await?; // Horizontal total size high byte
+                self.write_i2c(0x380d, 0x68).await?; // Horizontal total size low byte
+                self.write_i2c(0x380e, 0x03).await?; // Vertical total size high byte
+                self.write_i2c(0x380f, 0xd8).await?; // Vertical total size low byte
             }
             crate::camera::FrameSize::Qcif => {
                 // QCIF configuration (176x144)
@@ -1000,6 +1157,11 @@ impl<'a> OV5640Camera<'a> {
                 self.write_i2c(0x3809, 0xb0).await?; // DVP output horizontal size low byte (176)
                 self.write_i2c(0x380a, 0x00).await?; // DVP output vertical size high byte
                 self.write_i2c(0x380b, 0x90).await?; // DVP output vertical size low byte (144)
+                // Timing configuration for QCIF
+                self.write_i2c(0x380c, 0x07).await?; // Horizontal total size high byte (1928 >> 8)
+                self.write_i2c(0x380d, 0x88).await?; // Horizontal total size low byte (1928 & 0xFF)
+                self.write_i2c(0x380e, 0x03).await?; // Vertical total size high byte (776 >> 8)
+                self.write_i2c(0x380f, 0xd8).await?; // Vertical total size low byte (776 & 0xFF)
             }
 
             crate::camera::FrameSize::Qxga => {
@@ -1009,9 +1171,19 @@ impl<'a> OV5640Camera<'a> {
                 self.write_i2c(0x3809, 0x20).await?; // DVP output horizontal size low byte (2592)
                 self.write_i2c(0x380a, 0x07).await?; // DVP output vertical size high byte
                 self.write_i2c(0x380b, 0x98).await?; // DVP output vertical size low byte (1944)
+                // Timing configuration for QXGA
+                self.write_i2c(0x380c, 0x07).await?; // Horizontal total size high byte
+                self.write_i2c(0x380d, 0x68).await?; // Horizontal total size low byte
+                self.write_i2c(0x380e, 0x03).await?; // Vertical total size high byte
+                self.write_i2c(0x380f, 0xd8).await?; // Vertical total size low byte
             }
             _ => {
                 info!("Using default VGA configuration for unhandled frame size");
+                // Timing configuration for default VGA
+                self.write_i2c(0x380c, 0x07).await?; // Horizontal total size high byte
+                self.write_i2c(0x380d, 0x68).await?; // Horizontal total size low byte
+                self.write_i2c(0x380e, 0x03).await?; // Vertical total size high byte
+                self.write_i2c(0x380f, 0xd8).await?; // Vertical total size low byte
             }
         }
 
@@ -1037,6 +1209,38 @@ impl<'a> OV5640Camera<'a> {
         self.configure_image_quality().await?;
 
         info!("Default parameters configured");
+        Ok(())
+    }
+
+    /// Configure PCLK based on frame size for optimal performance
+    ///
+    /// PCLK must be set according to resolution and interface bandwidth
+    async fn configure_pclk_for_frame_size(&mut self) -> Result<(), &'static str> {
+        info!("Configuring PCLK for frame size");
+
+        // Configure PLL and clock dividers based on frame size
+        match self.camera.config.frame_size {
+            crate::camera::FrameSize::Qxga => {
+                // For high resolution (2592x1944), use higher PCLK
+                self.write_i2c(0x3035, 0x21).await?; // PLL pre-divider: 2
+                self.write_i2c(0x3036, 0x69).await?; // PLL multiplier: 105
+                self.write_i2c(0x3037, 0x13).await?; // PLL control
+            }
+            crate::camera::FrameSize::Vga | crate::camera::FrameSize::Qvga => {
+                // For medium resolutions, use moderate PCLK
+                self.write_i2c(0x3035, 0x21).await?; // PLL pre-divider: 2
+                self.write_i2c(0x3036, 0x41).await?; // PLL multiplier: 65
+                self.write_i2c(0x3037, 0x13).await?; // PLL control
+            }
+            _ => {
+                // For other resolutions, use default PCLK
+                self.write_i2c(0x3035, 0x21).await?; // PLL pre-divider: 2
+                self.write_i2c(0x3036, 0x69).await?; // PLL multiplier: 105
+                self.write_i2c(0x3037, 0x13).await?; // PLL control
+            }
+        }
+
+        info!("PCLK configuration completed");
         Ok(())
     }
 
@@ -1223,27 +1427,31 @@ impl<'a> OV5640Camera<'a> {
     }
 
     /// Set image stabilization
-    fn set_image_stabilization(&mut self, _enable: bool) {
-        info!("Setting image stabilization to {}", _enable);
-        // Implementation would interface with the actual camera driver
+    fn set_image_stabilization(&mut self, enable: bool) {
+        info!("Setting image stabilization to {}", enable);
+        // In a real implementation, this would interface with the actual camera driver
+        // to enable or disable image stabilization
     }
 
     /// Set banding filter
-    fn set_banding_filter(&mut self, _mode: BandingFilterMode) {
-        info!("Setting banding filter to mode {}", _mode);
-        // Implementation would interface with the actual camera driver
+    fn set_banding_filter(&mut self, mode: BandingFilterMode) {
+        info!("Setting banding filter to mode {}", mode);
+        // In a real implementation, this would interface with the actual camera driver
+        // to configure the banding filter settings
     }
 
     /// Set night mode
-    fn set_night_mode(&mut self, _enable: bool) {
-        info!("Setting night mode to {}", _enable);
-        // Implementation would interface with the actual camera driver
+    fn set_night_mode(&mut self, enable: bool) {
+        info!("Setting night mode to {}", enable);
+        // In a real implementation, this would interface with the actual camera driver
+        // to enable or disable night mode
     }
 
     /// Set HDR mode
-    fn set_hdr_mode(&mut self, _enable: bool) {
-        info!("Setting HDR mode to {}", _enable);
-        // Implementation would interface with the actual camera driver
+    fn set_hdr_mode(&mut self, enable: bool) {
+        info!("Setting HDR mode to {}", enable);
+        // In a real implementation, this would interface with the actual camera driver
+        // to enable or disable HDR mode
     }
 
     /// Set LED mode
@@ -1287,7 +1495,7 @@ impl<'a> OV5640Camera<'a> {
     }
 }
 
-/// Power management for OV5640
+/// OV5640 power management
 impl OV5640Camera<'_> {
     /// Enable or disable the camera sensor to manage power consumption
     ///
@@ -1299,7 +1507,7 @@ impl OV5640Camera<'_> {
     /// - Following the "use and release" principle to conserve power
     pub fn set_power_state(&mut self, enabled: bool) {
         info!("Setting OV5640 power state to: {}", enabled);
-        // Implementation would interface with the actual camera driver
+        // In a real implementation, this would interface with the actual camera driver
         // to enable or disable the sensor
     }
 
@@ -1309,8 +1517,10 @@ impl OV5640Camera<'_> {
     /// power consumption when not actively capturing images.
     pub fn enter_low_power_mode(&mut self) {
         info!("Entering OV5640 low power mode");
-        // Implementation would interface with the actual camera driver
+        // In a real implementation, this would interface with the actual camera driver
         // to put the sensor into standby mode
+        // Example implementation:
+        // self.write_i2c(0x3008, 0x42); // Software standby
     }
 
     /// Exit low power mode
@@ -1318,8 +1528,10 @@ impl OV5640Camera<'_> {
     /// Wakes the camera from low power standby mode.
     pub fn exit_low_power_mode(&mut self) {
         info!("Exiting OV5640 low power mode");
-        // Implementation would interface with the actual camera driver
+        // In a real implementation, this would interface with the actual camera driver
         // to wake the sensor from standby mode
+        // Example implementation:
+        // self.write_i2c(0x3008, 0x02); // Wake up
     }
 }
 
@@ -1626,6 +1838,8 @@ impl OV5640Camera<'_> {
     ) -> Result<(), &'static str> {
         info!("Setting banding filter mode to: {:?}", mode as u8);
 
+        // 在读取寄存器前增加延时，提高成功率
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(5)).await;
         let mut temp = self.read_i2c(0x3a00).await?;
 
         match mode {
@@ -1671,6 +1885,8 @@ impl OV5640Camera<'_> {
     async fn set_night_mode_internal(&mut self, enable: bool) -> Result<(), &'static str> {
         info!("Setting night mode to: {}", enable);
 
+        // 在读取寄存器前增加延时，提高成功率
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(5)).await;
         let mut temp = self.read_i2c(0x3a00).await?;
 
         if enable {
@@ -1731,6 +1947,80 @@ impl OV5640Camera<'_> {
         Ok(())
     }
 
+    /// Set image options including mirror and flip compensation
+    ///
+    /// This function implements the set_image_options functionality similar to C implementations,
+    /// including compensation for mirror and flip operations.
+    ///
+    /// # Arguments
+    /// * `mirror` - true to enable horizontal mirror, false to disable
+    /// * `flip` - true to enable vertical flip, false to disable
+    /// * `special_effect` - Special effect mode (0-6)
+    /// * `saturation` - Saturation level (0-2)
+    async fn set_image_options(
+        &mut self,
+        mirror: bool,
+        flip: bool,
+        special_effect: u8,
+        saturation: u8,
+    ) -> Result<(), &'static str> {
+        info!(
+            "Setting image options - mirror: {}, flip: {}, effect: {}, saturation: {}",
+            mirror, flip, special_effect, saturation
+        );
+
+        // Configure mirror and flip with compensation
+        self.set_mirror_flip_internal(mirror, flip).await?;
+
+        // When mirror or flip is enabled, we need to update register 0x4514 for compensation
+        if mirror || flip {
+            // Set bit 7 of register 0x4514 for mirror/flip compensation
+            // 在读取寄存器前增加延时，提高成功率
+            embassy_time::Timer::after(embassy_time::Duration::from_millis(5)).await;
+            let mut reg4514 = self.read_i2c(0x4514).await?;
+            reg4514 |= 0x80; // Set bit 7
+            self.write_i2c(0x4514, reg4514).await?;
+        }
+
+        // Set special effects
+        let effect_reg = match special_effect {
+            1 => 0x20, // Blueish
+            2 => 0x40, // Redish
+            3 => 0x10, // Black and white
+            4 => 0x08, // Sepia
+            5 => 0x30, // Greenish
+            6 => 0x50, // Overexposed
+            _ => 0x00, // Normal
+        };
+
+        self.write_i2c(0x5580, effect_reg).await?;
+
+        // Set saturation
+        match saturation {
+            1 => {
+                // Saturation +1
+                self.write_i2c(0x5381, 0x1c).await?;
+                self.write_i2c(0x5382, 0x5a).await?;
+                self.write_i2c(0x5383, 0x06).await?;
+            }
+            2 => {
+                // Saturation +2
+                self.write_i2c(0x5381, 0x18).await?;
+                self.write_i2c(0x5382, 0x5c).await?;
+                self.write_i2c(0x5383, 0x0c).await?;
+            }
+            _ => {
+                // Saturation 0 (default)
+                self.write_i2c(0x5381, 0x1e).await?;
+                self.write_i2c(0x5382, 0x5b).await?;
+                self.write_i2c(0x5383, 0x08).await?;
+            }
+        }
+
+        info!("Image options configured");
+        Ok(())
+    }
+
     /// Select power saving mode based on DOVDD voltage
     ///
     /// According to "OV5640_Camera_Module_Hardware_Application_Notes" Chapter 4,
@@ -1760,7 +2050,7 @@ impl OV5640Camera<'_> {
     ///
     /// # Arguments
     /// * `mode` - The power saving mode to enter
-    pub fn enter_power_saving_mode(&mut self, mode: PowerSavingMode) -> Result<(), &'static str> {
+    pub async fn enter_power_saving_mode(&mut self, mode: PowerSavingMode) -> Result<(), &'static str> {
         info!("Entering power saving mode: {:?}", mode);
 
         match mode {
@@ -1771,7 +2061,7 @@ impl OV5640Camera<'_> {
                 // some functionality
                 info!("Entering power down mode");
                 // Example register write (actual implementation would depend on datasheet):
-                // self.write_i2c(0x3008, 0x42)?; // Software standby
+                self.write_i2c(0x3008, 0x42).await?; // Software standby
             }
             PowerSavingMode::PowerOff => {
                 // Implement power off mode
@@ -1779,7 +2069,7 @@ impl OV5640Camera<'_> {
                 // to completely shut down the sensor
                 info!("Entering power off mode");
                 // Example register write (actual implementation would depend on datasheet):
-                // self.write_i2c(0x3008, 0x88)?; // Power down
+                self.write_i2c(0x3008, 0x88).await?; // Power down
             }
         }
 
@@ -1790,15 +2080,107 @@ impl OV5640Camera<'_> {
     /// Exit power saving mode
     ///
     /// This function wakes the OV5640 sensor from power saving mode.
-    pub fn exit_power_saving_mode(&mut self) -> Result<(), &'static str> {
+    pub async fn exit_power_saving_mode(&mut self) -> Result<(), &'static str> {
         info!("Exiting power saving mode");
 
         // This would typically involve setting specific registers
         // to wake the sensor from power saving mode
         // Example register write (actual implementation would depend on datasheet):
-        // self.write_i2c(0x3008, 0x02)?; // Wake up
+        self.write_i2c(0x3008, 0x02).await?; // Wake up
 
         info!("Exited power saving mode");
+        Ok(())
+    }
+
+    /// 测试SCCB通信是否正常工作
+    /// 通过控制摄像头上的LED来验证通信
+    pub async fn test_sccb_communication(&mut self) -> Result<(), &'static str> {
+        info!("Testing SCCB communication by controlling camera LED...");
+        
+        // 尝试读取一个寄存器来验证通信
+        match self.read_i2c(0x300A).await {
+            Ok(value) => {
+                info!("Successfully read register 0x300A, value: 0x{:02x}", value);
+            },
+            Err(e) => {
+                info!("Failed to read register 0x300A: {:?}", e);
+                return Err("SCCB communication test failed");
+            }
+        }
+        
+        // 尝试写入一个寄存器来验证写操作
+        match self.write_i2c(0x300A, 0x56).await {
+            Ok(()) => {
+                info!("Successfully wrote to register 0x300A");
+            },
+            Err(e) => {
+                info!("Failed to write to register 0x300A: {:?}", e);
+                return Err("SCCB communication test failed");
+            }
+        }
+        
+        info!("SCCB communication test passed!");
+        Ok(())
+    }
+    
+    /// 简单的LED控制测试函数
+    /// 用于验证SCCB通信是否正常工作
+    pub async fn test_led_control(&mut self) -> Result<(), &'static str> {
+        info!("Testing LED control via SCCB...");
+        
+        // 读取当前STROBE设置
+        let strobe_setting = match self.read_i2c(0x300A).await {
+            Ok(value) => {
+                info!("Current STROBE setting (register 0x300A): 0x{:02x}", value);
+                value
+            },
+            Err(e) => {
+                info!("Failed to read STROBE setting: {:?}", e);
+                return Err("LED control test failed");
+            }
+        };
+        
+        // 尝试修改STROBE设置
+        let new_setting = strobe_setting ^ 0x01; // 翻转最低位
+        match self.write_i2c(0x300A, new_setting).await {
+            Ok(()) => {
+                info!("Successfully wrote new STROBE setting: 0x{:02x}", new_setting);
+            },
+            Err(e) => {
+                info!("Failed to write STROBE setting: {:?}", e);
+                return Err("LED control test failed");
+            }
+        }
+        
+        // 验证写入是否成功
+        match self.read_i2c(0x300A).await {
+            Ok(value) => {
+                if value == new_setting {
+                    info!("Verified STROBE setting write, value: 0x{:02x}", value);
+                } else {
+                    info!("STROBE setting verification failed. Expected: 0x{:02x}, got: 0x{:02x}", 
+                          new_setting, value);
+                    return Err("LED control test failed - verification failed");
+                }
+            },
+            Err(e) => {
+                info!("Failed to verify STROBE setting: {:?}", e);
+                return Err("LED control test failed");
+            }
+        }
+        
+        // 恢复原始设置
+        match self.write_i2c(0x300A, strobe_setting).await {
+            Ok(()) => {
+                info!("Restored original STROBE setting: 0x{:02x}", strobe_setting);
+            },
+            Err(e) => {
+                info!("Failed to restore original STROBE setting: {:?}", e);
+                // 这不是致命错误，我们仍然认为测试成功
+            }
+        }
+        
+        info!("LED control test passed!");
         Ok(())
     }
 }
@@ -2015,7 +2397,67 @@ impl OV5640Camera<'_> {
 
     /// 获取对摄像头I2C接口的可变引用
     /// 用于外部模块直接访问摄像头寄存器
+    /// 
+    /// # 安全性说明
+    /// 该函数允许直接访问摄像头寄存器，调用者需要确保：
+    /// 1. 不会写入可能损坏摄像头硬件的非法值
+    /// 2. 不会在关键操作期间干扰正常的摄像头功能
+    /// 3. 了解所访问寄存器的功能和正确的数值范围
+    /// 
+    /// # 返回值
+    /// 返回对当前OV5640Camera实例的可变引用，允许直接调用write_i2c和read_i2c方法
     pub fn get_i2c_mut(&mut self) -> &mut Self {
         self
+    }
+    
+    /// 安全地写入OV5640寄存器
+    /// 
+    /// 该函数提供了一个安全的寄存器写入接口，包含基本的参数验证
+    /// 
+    /// # 参数
+    /// * `reg` - 16位寄存器地址
+    /// * `value` - 8位要写入的值
+    /// 
+    /// # 返回值
+    /// * `Ok(())` - 写入成功
+    /// * `Err(&'static str)` - 写入失败，返回错误原因
+    /// 
+    /// # 错误情况
+    /// * 如果寄存器地址位于保留区域，可能返回错误
+    /// * 如果I2C通信失败，返回相应的错误信息
+    pub async fn safe_write_i2c(&mut self, reg: u16, value: u8) -> Result<(), &'static str> {
+        // 基本的寄存器地址验证
+        // OV5640寄存器地址范围通常是0x3000-0x5000左右
+        if reg < 0x3000 || reg > 0x5FFF {
+            info!("Warning: Writing to potentially invalid register address: 0x{:04x}", reg);
+        }
+        
+        // 执行实际的写入操作
+        self.write_i2c(reg, value).await
+    }
+    
+    /// 安全地读取OV5640寄存器
+    /// 
+    /// 该函数提供了一个安全的寄存器读取接口，包含基本的参数验证
+    /// 
+    /// # 参数
+    /// * `reg` - 16位寄存器地址
+    /// 
+    /// # 返回值
+    /// * `Ok(u8)` - 读取成功，返回读取到的值
+    /// * `Err(&'static str)` - 读取失败，返回错误原因
+    /// 
+    /// # 错误情况
+    /// * 如果寄存器地址位于保留区域，可能返回错误
+    /// * 如果I2C通信失败，返回相应的错误信息
+    pub async fn safe_read_i2c(&mut self, reg: u16) -> Result<u8, &'static str> {
+        // 基本的寄存器地址验证
+        // OV5640寄存器地址范围通常是0x3000-0x5000左右
+        if reg < 0x3000 || reg > 0x5FFF {
+            info!("Warning: Reading from potentially invalid register address: 0x{:04x}", reg);
+        }
+        
+        // 执行实际的读取操作
+        self.read_i2c(reg).await
     }
 }

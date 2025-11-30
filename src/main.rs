@@ -227,6 +227,73 @@ async fn main(spawner: Spawner) {
     // 初始化 XL9555 GPIO 扩展芯片
     // 使用 I2C0 接口，SDA 连接 GPIO41，SCL 连接 GPIO42
     i2c::init(peripherals.I2C0, peripherals.GPIO41, peripherals.GPIO42).await;
+    
+    // 检测 I2C 总线上的设备
+    info!("Scanning I2C bus for devices...");
+    match i2c::scan_bus().await {
+        Ok(devices) => {
+            if devices.is_empty() {
+                info!("No I2C devices found on the bus");
+            } else {
+                info!("Found {} I2C device(s):", devices.len());
+                for addr in devices {
+                    info!("  Device found at address 0x{:02x}", addr);
+                }
+            }
+        },
+        Err(e) => {
+            info!("Error scanning I2C bus: {:?}", e);
+        }
+    }
+    
+    // 测试OV5640 SCCB接口
+    info!("Testing OV5640 SCCB interface...");
+    // 使用正确的OV5640 7位地址 (0x3C)
+    match i2c::detect_device(0x3C).await {
+        Ok(true) => {
+            info!("OV5640 detected at address 0x3C");
+            // 尝试读取芯片ID来进一步验证
+            match i2c::read_ov5640_chip_id(0x3C).await {
+                Ok(chip_id) => {
+                    if chip_id == 0x5640 {
+                        info!("OV5640 chip ID verified: 0x{:04x}", chip_id);
+                    } else {
+                        info!("Unexpected chip ID at address 0x3C: 0x{:04x}", chip_id);
+                    }
+                },
+                Err(e) => {
+                    info!("Error reading OV5640 chip ID: {:?}", e);
+                }
+            }
+        },
+        Ok(false) => {
+            warn!("OV5640 not detected at address 0x3C");
+            // 尝试其他可能的地址
+            for addr in [0x3A, 0x3B, 0x3D, 0x3E, 0x3F] {
+                match i2c::detect_device(addr).await {
+                    Ok(true) => {
+                        info!("Device found at alternative address 0x{:02x}", addr);
+                        // 尝试读取芯片ID
+                        match i2c::read_ov5640_chip_id(addr).await {
+                            Ok(chip_id) => {
+                                info!("Chip ID at address 0x{:02x}: 0x{:04x}", addr, chip_id);
+                            },
+                            Err(e) => {
+                                info!("Error reading chip ID at address 0x{:02x}: {:?}", addr, e);
+                            }
+                        }
+                    },
+                    Ok(false) => {},
+                    Err(e) => info!("Error scanning alternative address 0x{:02x}: {:?}", addr, e),
+                }
+            }
+        },
+        Err(e) => warn!("Error detecting OV5640: {:?}", e),
+    }
+    
+    // 注意：暂时注释掉SCCB测试代码，因为我们已经在后面完整初始化了摄像头
+    // 等待完整初始化后再进行测试
+    
     let result = xl9555::init().await;
     if result.is_err() {
         panic!("Failed to initialize XL9555 GPIO expander");
@@ -374,6 +441,27 @@ async fn main(spawner: Spawner) {
     match ov5640_camera.init().await {
         Ok(()) => {
             info!("OV5640 camera initialized successfully");
+
+            // 在摄像头初始化成功后立即测试SCCB通信
+            info!("Testing SCCB communication after camera initialization...");
+            match ov5640_camera.test_sccb_communication().await {
+                Ok(()) => {
+                    info!("SCCB communication test passed!");
+                },
+                Err(e) => {
+                    info!("SCCB communication test failed: {}", e);
+                }
+            }
+            
+            // 测试LED控制
+            match ov5640_camera.test_led_control().await {
+                Ok(()) => {
+                    info!("LED control test passed!");
+                },
+                Err(e) => {
+                    info!("LED control test failed: {}", e);
+                }
+            }
 
             // 测试摄像头性能（使用更少的帧数以减少内存压力）
             match ov5640_camera.test_performance(2).await {

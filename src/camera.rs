@@ -39,20 +39,20 @@ impl Default for CameraPins<'_> {
         Self {
             pin_pwdn: None,
             pin_reset: None,
-            pin_xclk: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-            pin_sccb_sda: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-            pin_sccb_scl: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-            pin_d7: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-            pin_d6: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-            pin_d5: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-            pin_d4: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-            pin_d3: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-            pin_d2: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-            pin_d1: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-            pin_d0: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-            pin_vsync: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-            pin_href: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-            pin_pclk: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
+            pin_xclk: unsafe { core::mem::zeroed() },
+            pin_sccb_sda: unsafe { core::mem::zeroed() },
+            pin_sccb_scl: unsafe { core::mem::zeroed() },
+            pin_d7: unsafe { core::mem::zeroed() },
+            pin_d6: unsafe { core::mem::zeroed() },
+            pin_d5: unsafe { core::mem::zeroed() },
+            pin_d4: unsafe { core::mem::zeroed() },
+            pin_d3: unsafe { core::mem::zeroed() },
+            pin_d2: unsafe { core::mem::zeroed() },
+            pin_d1: unsafe { core::mem::zeroed() },
+            pin_d0: unsafe { core::mem::zeroed() },
+            pin_vsync: unsafe { core::mem::zeroed() },
+            pin_href: unsafe { core::mem::zeroed() },
+            pin_pclk: unsafe { core::mem::zeroed() },
         }
     }
 }
@@ -103,20 +103,20 @@ impl Default for CameraConfig<'_> {
             pins: CameraPins {
                 pin_pwdn: None,
                 pin_reset: None,
-                pin_xclk: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-                pin_sccb_sda: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-                pin_sccb_scl: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-                pin_d7: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-                pin_d6: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-                pin_d5: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-                pin_d4: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-                pin_d3: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-                pin_d2: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-                pin_d1: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-                pin_d0: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-                pin_vsync: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-                pin_href: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
-                pin_pclk: unsafe { core::mem::MaybeUninit::uninit().assume_init() },
+                pin_xclk: unsafe { core::mem::zeroed() },
+                pin_sccb_sda: unsafe { core::mem::zeroed() },
+                pin_sccb_scl: unsafe { core::mem::zeroed() },
+                pin_d7: unsafe { core::mem::zeroed() },
+                pin_d6: unsafe { core::mem::zeroed() },
+                pin_d5: unsafe { core::mem::zeroed() },
+                pin_d4: unsafe { core::mem::zeroed() },
+                pin_d3: unsafe { core::mem::zeroed() },
+                pin_d2: unsafe { core::mem::zeroed() },
+                pin_d1: unsafe { core::mem::zeroed() },
+                pin_d0: unsafe { core::mem::zeroed() },
+                pin_vsync: unsafe { core::mem::zeroed() },
+                pin_href: unsafe { core::mem::zeroed() },
+                pin_pclk: unsafe { core::mem::zeroed() },
             },
             xclk_freq_hz: 20_000_000,
             pixel_format: PixelFormat::Rgb565,
@@ -424,135 +424,179 @@ impl<'a> Camera<'a> {
     }
 
     /// Set brightness
-    fn set_brightness(&mut self, _brightness: i8) {
+    fn set_brightness(&mut self, brightness: i8) {
         // Implementation would interface with the actual camera driver
-        info!("Setting brightness to {}", _brightness);
+        info!("Setting brightness to {}", brightness);
+        // In a real implementation, this would write to camera registers
+        // Example: write to register that controls brightness
     }
 
     /// Set contrast
-    fn set_contrast(&mut self, _contrast: i8) {
+    fn set_contrast(&mut self, contrast: i8) {
         // Implementation would interface with the actual camera driver
-        info!("Setting contrast to {}", _contrast);
+        info!("Setting contrast to {}", contrast);
+        // In a real implementation, this would write to camera registers
+        // Example: write to register that controls contrast
     }
 
     /// Set saturation
-    fn set_saturation(&mut self, _saturation: i8) {
+    fn set_saturation(&mut self, saturation: i8) {
         // Implementation would interface with the actual camera driver
-        info!("Setting saturation to {}", _saturation);
+        info!("Setting saturation to {}", saturation);
+        // In a real implementation, this would write to camera registers
+        // Example: write to register that controls saturation
     }
 
     /// Set sharpness
-    fn set_sharpness(&mut self, _sharpness: i8) {
+    fn set_sharpness(&mut self, sharpness: i8) {
         // Implementation would interface with the actual camera driver
-        info!("Setting sharpness to {}", _sharpness);
+        info!("Setting sharpness to {}", sharpness);
+        // In a real implementation, this would write to camera registers
+        // Example: write to register that controls sharpness
     }
 
     /// Set white balance
-    fn set_whitebal(&mut self, _whitebal: bool) {
+    fn set_whitebal(&mut self, whitebal: bool) {
         // Implementation would interface with the actual camera driver
-        info!("Setting white balance to {}", _whitebal);
+        info!("Setting white balance to {}", whitebal);
+        // In a real implementation, this would write to camera registers
+        // Example: write to register that controls white balance
     }
 
     /// Set AWB gain
-    fn set_awb_gain(&mut self, _awb_gain: bool) {
+    fn set_awb_gain(&mut self, awb_gain: bool) {
         // Implementation would interface with the actual camera driver
-        info!("Setting AWB gain to {}", _awb_gain);
+        info!("Setting AWB gain to {}", awb_gain);
+        // In a real implementation, this would write to camera registers
+        // Example: write to register that controls AWB gain
     }
 
     /// Set WB mode
-    fn set_wb_mode(&mut self, _wb_mode: u8) {
+    fn set_wb_mode(&mut self, wb_mode: u8) {
         // Implementation would interface with the actual camera driver
-        info!("Setting WB mode to {}", _wb_mode);
+        info!("Setting WB mode to {}", wb_mode);
+        // In a real implementation, this would write to camera registers
+        // Example: write to register that controls WB mode
     }
 
     /// Set exposure control
-    fn set_exposure_ctrl(&mut self, _exposure_ctrl: bool) {
+    fn set_exposure_ctrl(&mut self, exposure_ctrl: bool) {
         // Implementation would interface with the actual camera driver
-        info!("Setting exposure control to {}", _exposure_ctrl);
+        info!("Setting exposure control to {}", exposure_ctrl);
+        // In a real implementation, this would write to camera registers
+        // Example: write to register that controls exposure
     }
 
     /// Set AEC2
-    fn set_aec2(&mut self, _aec2: bool) {
+    fn set_aec2(&mut self, aec2: bool) {
         // Implementation would interface with the actual camera driver
-        info!("Setting AEC2 to {}", _aec2);
+        info!("Setting AEC2 to {}", aec2);
+        // In a real implementation, this would write to camera registers
+        // Example: write to register that controls AEC2
     }
 
     /// Set AE level
-    fn set_ae_level(&mut self, _ae_level: i8) {
+    fn set_ae_level(&mut self, ae_level: i8) {
         // Implementation would interface with the actual camera driver
-        info!("Setting AE level to {}", _ae_level);
+        info!("Setting AE level to {}", ae_level);
+        // In a real implementation, this would write to camera registers
+        // Example: write to register that controls AE level
     }
 
     /// Set AEC value
-    fn set_aec_value(&mut self, _aec_value: u16) {
+    fn set_aec_value(&mut self, aec_value: u16) {
         // Implementation would interface with the actual camera driver
-        info!("Setting AEC value to {}", _aec_value);
+        info!("Setting AEC value to {}", aec_value);
+        // In a real implementation, this would write to camera registers
+        // Example: write to registers that control AEC value
     }
 
     /// Set gain control
-    fn set_gain_ctrl(&mut self, _gain_ctrl: bool) {
+    fn set_gain_ctrl(&mut self, gain_ctrl: bool) {
         // Implementation would interface with the actual camera driver
-        info!("Setting gain control to {}", _gain_ctrl);
+        info!("Setting gain control to {}", gain_ctrl);
+        // In a real implementation, this would write to camera registers
+        // Example: write to register that controls gain
     }
 
     /// Set AGC gain
-    fn set_agc_gain(&mut self, _agc_gain: u8) {
+    fn set_agc_gain(&mut self, agc_gain: u8) {
         // Implementation would interface with the actual camera driver
-        info!("Setting AGC gain to {}", _agc_gain);
+        info!("Setting AGC gain to {}", agc_gain);
+        // In a real implementation, this would write to camera registers
+        // Example: write to register that controls AGC gain
     }
 
     /// Set gain ceiling
-    fn set_gainceiling(&mut self, _gainceiling: GainCeiling) {
+    fn set_gainceiling(&mut self, gainceiling: GainCeiling) {
         // Implementation would interface with the actual camera driver
-        info!("Setting gain ceiling to {:?}", _gainceiling);
+        info!("Setting gain ceiling to {:?}", gainceiling);
+        // In a real implementation, this would write to camera registers
+        // Example: write to register that controls gain ceiling
     }
 
     /// Set bad pixel correction
-    fn set_bpc(&mut self, _bpc: bool) {
+    fn set_bpc(&mut self, bpc: bool) {
         // Implementation would interface with the actual camera driver
-        info!("Setting BPC to {}", _bpc);
+        info!("Setting BPC to {}", bpc);
+        // In a real implementation, this would write to camera registers
+        // Example: write to register that controls bad pixel correction
     }
 
     /// Set white pixel correction
-    fn set_wpc(&mut self, _wpc: bool) {
+    fn set_wpc(&mut self, wpc: bool) {
         // Implementation would interface with the actual camera driver
-        info!("Setting WPC to {}", _wpc);
+        info!("Setting WPC to {}", wpc);
+        // In a real implementation, this would write to camera registers
+        // Example: write to register that controls white pixel correction
     }
 
     /// Set raw gamma
-    fn set_raw_gma(&mut self, _raw_gma: bool) {
+    fn set_raw_gma(&mut self, raw_gma: bool) {
         // Implementation would interface with the actual camera driver
-        info!("Setting raw gamma to {}", _raw_gma);
+        info!("Setting raw gamma to {}", raw_gma);
+        // In a real implementation, this would write to camera registers
+        // Example: write to register that controls raw gamma
     }
 
     /// Set lens correction
-    fn set_lenc(&mut self, _lenc: bool) {
+    fn set_lenc(&mut self, lenc: bool) {
         // Implementation would interface with the actual camera driver
-        info!("Setting lens correction to {}", _lenc);
+        info!("Setting lens correction to {}", lenc);
+        // In a real implementation, this would write to camera registers
+        // Example: write to register that controls lens correction
     }
 
     /// Set horizontal mirror
-    fn set_hmirror(&mut self, _hmirror: bool) {
+    fn set_hmirror(&mut self, hmirror: bool) {
         // Implementation would interface with the actual camera driver
-        info!("Setting horizontal mirror to {}", _hmirror);
+        info!("Setting horizontal mirror to {}", hmirror);
+        // In a real implementation, this would write to camera registers
+        // Example: write to register that controls horizontal mirror
     }
 
     /// Set vertical flip
-    fn set_vflip(&mut self, _vflip: bool) {
+    fn set_vflip(&mut self, vflip: bool) {
         // Implementation would interface with the actual camera driver
-        info!("Setting vertical flip to {}", _vflip);
+        info!("Setting vertical flip to {}", vflip);
+        // In a real implementation, this would write to camera registers
+        // Example: write to register that controls vertical flip
     }
 
     /// Set DCW
-    fn set_dcw(&mut self, _dcw: bool) {
+    fn set_dcw(&mut self, dcw: bool) {
         // Implementation would interface with the actual camera driver
-        info!("Setting DCW to {}", _dcw);
+        info!("Setting DCW to {}", dcw);
+        // In a real implementation, this would write to camera registers
+        // Example: write to register that controls DCW
     }
 
     /// Set color bar
-    fn set_colorbar(&mut self, _colorbar: bool) {
+    fn set_colorbar(&mut self, colorbar: bool) {
         // Implementation would interface with the actual camera driver
-        info!("Setting color bar to {}", _colorbar);
+        info!("Setting color bar to {}", colorbar);
+        // In a real implementation, this would write to camera registers
+        // Example: write to register that controls color bar
     }
 }
 
